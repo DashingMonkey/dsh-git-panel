@@ -1,0 +1,17 @@
+# @dsh-local/git-panel — bundle patch layer
+#
+# 组合包（bundle）补丁：向 loader 树插入一个插件行。
+# 引用按包名（@dsh-local/git-panel），由 profile 的 node_modules / pnpm 解析。
+# 安装方式：
+#   - 本机一键安装：./install.sh（复制包到 profile 的 node_modules + 注册本层）
+#   - 或声明 dsh.bundle 后经 `dsh plugin --profile web add <路径|tgz>` 安装
+#
+# config 仅在文件态（loader）装载时生效（apply(ctx, config) 第二参）；
+# 动态 Cordis 包形态无 config，扫描上限用内置默认值（深度 10 / 2000 目录 / 50 仓库）。
+- insert:
+    - id: git-panel
+      name: '@dsh-local/git-panel'
+      config:
+        scanMaxDepth: 10
+        scanMaxDirs: 2000
+        scanMaxRepos: 50

@@ -1,0 +1,27 @@
+# git-panel — web profile 补丁层示例
+#
+# 用法（持久化装载，需重启 dsh web）：
+#   dsh web --patch <本仓库路径>/cordis.yml
+#
+# 前提：
+#   1. 本目录位于 web profile 的 pnpm workspace 内
+#      （把本目录路径加入 $DSH_HOME/profiles/web/pnpm-workspace.yaml 的 packages，
+#       或把本目录拷贝到 profiles/web/ 下并在其 package.json 增加 workspace 依赖）；
+#   2. 在 profiles/web 下执行 pnpm install 链接该包；
+#   3. 重启 dsh web。
+#
+# 说明：动态 Cordis 包进程重启即失，此文件用于跨会话 / 跨重启持久化装载。
+# 与 package.json 的 dsh.client 声明配合，Client 半体会被 dsh.client 扫描并
+# 作为浏览器插件打包进 Web 启动图。
+# 注意：通信层当前依赖动态包运行器内置件（harness.handle / host.call），
+# 文件态 loader 经 ctx.connection.rpc 适配（见 docs/architecture.md）。
+# 下方 scan* 配置键经 apply(ctx, config) 传入 src/host.js 生效；
+# 动态包形态无 config，扫描上限用默认值。
+
+- id: git-panel
+  name: git-panel
+  config:
+    # 可选：仓库发现深度/上限（默认：depth 10 / 2000 目录 / 50 仓库）
+    scanMaxDepth: 10
+    scanMaxDirs: 2000
+    scanMaxRepos: 50

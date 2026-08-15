@@ -1,0 +1,9 @@
+# 构建产物（由 npm run build 生成，install.mjs 会自动重新构建）
+lib/
+
+# pnpm pack 产物
+*.tgz
+
+# 依赖与系统文件
+node_modules/
+.DS_Store

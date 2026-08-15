@@ -1,0 +1,34 @@
+{
+  "name": "@dsh-local/git-panel",
+  "version": "1.0.0",
+  "description": "Git workspace panel for DSH Web: repo discovery, stage/commit like VS Code Source Control, AI-generated commit messages via configurable rules, history graph and diff preview",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "immediately": true
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepare": "npm run build"
+  }
+}
