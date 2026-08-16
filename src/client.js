@@ -20,7 +20,7 @@
  *   GitPanel.tsx        → GitPanelMain（主面板 + 扫描 + 工作空间跟随 + 拖拽调宽）
  *   RepoCard.tsx        → RepoCard（仓库卡片 + 分支/更多菜单 + 变更分组 + 暂存操作）
  *   CommitArea.tsx      → CommitArea（提交输入 + 生成 + 规则 + 提交/提交并推送，仅处理 staged）
- *   CommitRuleEditor.tsx→ RuleEditorModal（system_prompt / user_context 双编辑框（键名固定防误删）+ 实时预览 + 仓库专属开关）
+ *   CommitRuleEditor.tsx→ RuleEditorModal（system_prompt / user_context 双编辑框（键名固定防误删）+ 实时预览 + 顶部 全局/仓库 双 checkbox 互斥切换）
  *   GitGraph.tsx        → GitGraphView（SVG 图谱：lane 配色/圆角合并线 + 悬停详情浮层）
  *   DiffPreview.tsx     → DiffPane（右侧只读 diff 预览）
  *
@@ -209,7 +209,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-diff-hdr { color: var(--dsw-alias-label-secondary); font-weight: 600; }
 .gp-diff-plain { color: var(--dsw-alias-label-secondary); }
 .gp-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 400; pointer-events: auto; }
-.gp-modal { background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; width: 960px; max-width: 94vw; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+.gp-modal { background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; width: 1180px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
 .gp-modal-sm { width: 440px; }
 .gp-genmodel-scroll { max-height: 42vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 2px; }
 .gp-genmodel-group { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
@@ -224,11 +224,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-modal-head { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--dsw-alias-border-l1); font-weight: 600; font-size: 14px; }
 .gp-modal-body { flex: 1; overflow: auto; padding: 12px 14px; }
 .gp-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 11px 14px; border-top: 1px solid var(--dsw-alias-border-l1); }
-.gp-rule-cols { display: flex; gap: 12px; height: 500px; }
+.gp-rule-cols { display: flex; gap: 12px; height: min(660px, 60vh); }
 .gp-rule-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .gp-rule-col-title { font-size: 12px; font-weight: 700; color: var(--dsw-alias-label-secondary); margin-bottom: 6px; letter-spacing: .3px; }
 /* 规则编辑器：system_prompt / user_context 两个独立编辑框，键名固定展示、不可编辑，
-   从根上避免误删 YAML 键；普通单层 textarea，无叠加层对齐问题；两框等宽等高（各占一半）。 */
+   从根上避免误删 YAML 键；普通单层 textarea，无叠加层对齐问题；两框等宽等高（各占一半）。
+   顶部 全局/仓库 两个互斥 checkbox：双缓冲保存两份内容，切换不丢未保存修改。 */
 .gp-rule-fields { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .gp-rule-field { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; }
 .gp-rule-field-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px; font-size: 12px; font-weight: 700; color: var(--dsw-alias-label-secondary); letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -246,7 +247,10 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 @keyframes gp-toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(28px); } }
 .gp-toast-success { border-left-color: var(--dsw-alias-state-success-primary); }
 .gp-toast-error { border-left-color: var(--dsw-alias-state-error-primary); }
-.gp-toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+.gp-rule-scope { display: flex; align-items: center; gap: 22px; margin-bottom: 4px; font-size: 13px; }
+.gp-rule-scope label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.gp-rule-scope input { cursor: pointer; }
+.gp-rule-scope-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); margin: 0 0 10px; font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gp-danger { color: var(--dsw-alias-state-error-primary); font-weight: 600; }
 .gp-confirm-summary { margin: 6px 0 10px; font-size: 13.5px; display: flex; align-items: flex-start; gap: 6px; }
 .gp-confirm-input { width: 100%; padding: 8px 9px; font-size: 13.5px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
@@ -333,7 +337,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           groupStaged: '暂存的更改', groupChanges: '更改', groupUntracked: '未跟踪的更改', history: '历史',
           rulesLoadFailed: '读取规则失败', reading: '(读取中…)', saved: '已保存', saveFailed: '保存失败', saveFailedWith: '保存失败: {e}',
           validationNoSys: '校验失败: 缺少 system_prompt', validationNoUser: '校验失败: 缺少 user_context',
-          restoredDefaults: '已恢复为内置默认内容（未保存）', repoOnlyLabel: '仓库专属规则（覆盖全局默认，保存到 {name}.yaml）',
+          restoredDefaults: '已恢复为内置默认内容（未保存）', globalRules: '全局规则', repoRules: '仓库规则', scopeSaveTo: '保存到: {p}', scopeNewFile: '（文件不存在，保存时创建）',
           rulesContent: '规则内容', sysPromptLabel: '系统提示词（必填）', userCtxLabel: '用户上下文（必填）',
           livePreview: '实时预览（最终注入 LLM 的 prompt）', userCtxTitle: 'USER CONTEXT（占位符已替换）', userCtxPlaceholder: '（占位符已替换）',
           empty: '(空)', missingUserCtx: '(缺少 user_context)', stagedPlaceholder: '<已暂存的文件，生成时实时注入>',
@@ -343,15 +347,15 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
           stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', generated: '已生成提交信息（规则来源：{s}）',
           ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}',
-          commitFailed: '提交失败: {e}', editRules: '编辑提交规则', setRepoRules: '为当前仓库单独设置规则',
-          resetGlobalRules: '重置全局默认为内置规则', resetRepoRules: '重置仓库专属规则', copyRules: '复制当前生效规则到剪贴板',
+          commitFailed: '提交失败: {e}', editRules: '编辑提交规则',
+          copyRules: '复制当前生效规则到剪贴板',
           effectiveRules: '当前生效：{s}', loading: '读取中…', msgPlaceholder: '提交信息（仅提交已暂存的文件；Ctrl+Enter 提交）',
           genTitle: '生成提交信息', genTitleWithModel: '当前生成模型：{m}',
           genModelConfig: '配置生成模型…', genModelFollowDefault: '跟随当前会话模型（默认）',
           genModelEffort: '思考强度', genModelEffortFollow: '跟随模型默认', genModelEffortOff: '关闭思考', genModelEffortHigh: '高', genModelEffortMax: '最大',
           genModelSaved: '已保存生成模型', genModelLoadFailed: '读取生成模型/模型列表失败', genModelEmpty: '没有可用模型',
           genModelCurrent: '生成模型: {m}', genModelThinking: '思考: {e}',
-          genModelDefaultMark: '（默认）', genModelThinkingParen: '（思考: {e}）', resetDone: '已重置', resetFailed: '重置失败', copied: '已复制', copyFailed: '复制失败',
+          genModelDefaultMark: '（默认）', genModelThinkingParen: '（思考: {e}）', copied: '已复制', copyFailed: '复制失败',
           stagedCount: '已暂存 {n} 个文件', noStaged: '暂无暂存文件', generate: '生成', generating: '生成中…', rules: '规则',
           commit: '提交', committing: '提交中…', pushing: '推送中…', commitAndPush: '提交并推送',
           titleStageFirst: '先用文件右侧的 + 暂存文件', commitTitle: 'git commit（仅已暂存的 {n} 个文件）', pushTitle: '提交成功后推送当前分支',
@@ -376,7 +380,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', history: 'History',
           rulesLoadFailed: 'Failed to load rules', reading: '(loading…)', saved: 'Saved', saveFailed: 'Save failed', saveFailedWith: 'Save failed: {e}',
           validationNoSys: 'Validation failed: missing system_prompt', validationNoUser: 'Validation failed: missing user_context',
-          restoredDefaults: 'Restored to built-in defaults (not saved)', repoOnlyLabel: 'Repo-specific rules (override global defaults, saved to {name}.yaml)',
+          restoredDefaults: 'Restored to built-in defaults (not saved)', globalRules: 'Global rules', repoRules: 'Repo rules', scopeSaveTo: 'Saved to: {p}', scopeNewFile: ' (file does not exist, will be created on save)',
           rulesContent: 'Rule content', sysPromptLabel: 'system prompt (required)', userCtxLabel: 'user context (required)',
           livePreview: 'Live preview (the final prompt injected into the LLM)', userCtxTitle: 'USER CONTEXT (placeholders replaced)', userCtxPlaceholder: '(placeholders replaced)',
           empty: '(empty)', missingUserCtx: '(missing user_context)', stagedPlaceholder: '<staged files, injected live at generation>',
@@ -386,15 +390,15 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
           stageFirst: 'Stage files first using the + on the right of each file', generated: 'Commit message generated (rules: {s})',
           ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}',
-          commitFailed: 'Commit failed: {e}', editRules: 'Edit commit rules', setRepoRules: 'Set rules for this repo only',
-          resetGlobalRules: 'Reset global defaults to built-in rules', resetRepoRules: 'Reset repo-specific rules', copyRules: 'Copy effective rules to the clipboard',
+          commitFailed: 'Commit failed: {e}', editRules: 'Edit commit rules',
+          copyRules: 'Copy effective rules to the clipboard',
           effectiveRules: 'Effective: {s}', loading: 'Loading…', msgPlaceholder: 'Commit message (commits only staged files; Ctrl+Enter to commit)',
           genTitle: 'Generate commit message', genTitleWithModel: 'Generation model: {m}',
           genModelConfig: 'Configure generation model…', genModelFollowDefault: 'Follow current session model (default)',
           genModelEffort: 'Reasoning effort', genModelEffortFollow: 'Model default', genModelEffortOff: 'Off', genModelEffortHigh: 'High', genModelEffortMax: 'Max',
           genModelSaved: 'Generation model saved', genModelLoadFailed: 'Failed to load generation model / model list', genModelEmpty: 'No models available',
           genModelCurrent: 'Generation model: {m}', genModelThinking: 'thinking: {e}',
-          genModelDefaultMark: ' (default)', genModelThinkingParen: ' (thinking: {e})', resetDone: 'Reset', resetFailed: 'Reset failed', copied: 'Copied', copyFailed: 'Copy failed',
+          genModelDefaultMark: ' (default)', genModelThinkingParen: ' (thinking: {e})', copied: 'Copied', copyFailed: 'Copy failed',
           stagedCount: '{n} files staged', noStaged: 'No staged files', generate: 'Generate', generating: 'Generating…', rules: 'Rules',
           commit: 'Commit', committing: 'Committing…', pushing: 'Pushing…', commitAndPush: 'Commit & Push',
           titleStageFirst: 'Stage files first with +', commitTitle: 'git commit (only {n} staged files)', pushTitle: 'Commits, then pushes the current branch',
@@ -519,11 +523,13 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           (s.toasts || []).map((t) => React.createElement('div', { key: t.id, className: 'gp-toast gp-toast-' + t.kind + (t.exiting ? ' gp-toast-exit' : '') }, t.text)))
       }
 
-      function RuleEditorModal({ repo, scope, onClose }) {
-        // 两个独立编辑框：system_prompt / user_context 的 YAML 键固定展示、不可编辑，避免误删
-        const [sysPrompt, setSysPrompt] = React.useState('')
-        const [userCtx, setUserCtx] = React.useState('')
-        const [repoOnly, setRepoOnly] = React.useState(scope === 'repo')
+      function RuleEditorModal({ repo, onClose }) {
+        // 双缓冲：全局 / 仓库各一套编辑内容，切换 checkbox 不丢失未保存的修改
+        const [buffers, setBuffers] = React.useState({ global: { sysPrompt: '', userCtx: '' }, repo: { sysPrompt: '', userCtx: '' } })
+        const [defaults, setDefaults] = React.useState({ sysPrompt: '', userCtx: '' })
+        const [paths, setPaths] = React.useState({ global: '', repo: '' })
+        const [repoExists, setRepoExists] = React.useState(false)
+        const [scope, setScope] = React.useState('global')
         const [loaded, setLoaded] = React.useState(false)
         const [saving, setSaving] = React.useState(false)
         const [branch, setBranch] = React.useState(tr('reading'))
@@ -531,43 +537,45 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         React.useEffect(() => {
           callRpc('rulesGet', { repoId: repo.id }).then((r) => {
             if (r && r.ok) {
-              const initial = scope === 'repo' ? (r.repoYaml || r.defaultYaml) : r.defaultYaml
-              const fields = parseRulesYaml(initial)
-              setSysPrompt(fields.system_prompt || '')
-              setUserCtx(fields.user_context || '')
+              const g = parseRulesYaml(r.defaultYaml)
+              const rp = parseRulesYaml(r.repoYaml || r.defaultYaml)
+              setBuffers({
+                global: { sysPrompt: g.system_prompt || '', userCtx: g.user_context || '' },
+                repo: { sysPrompt: rp.system_prompt || '', userCtx: rp.user_context || '' }
+              })
+              setDefaults({ sysPrompt: g.system_prompt || '', userCtx: g.user_context || '' })
+              setPaths({ global: r.defaultPath || '', repo: r.repoPath || '' })
+              setRepoExists(!!r.repoRuleExists)
               setLoaded(true)
             } else pushToast('error', (r && r.error) || tr('rulesLoadFailed'))
           }).catch((e) => pushToast('error', tr('rulesLoadFailed') + ': ' + (e && e.message ? e.message : String(e))))
           callRpc('status', { repoId: repo.id }).then((r) => { if (r && r.ok && r.branch) setBranch(r.branch) }).catch(() => {})
         }, [repo.id])
 
-        const previewUser = (userCtx || tr('missingUserCtx'))
+        const buf = buffers[scope]
+        const patchBuf = (p) => setBuffers((b) => ({ ...b, [scope]: { ...b[scope], ...p } }))
+
+        const previewUser = (buf.userCtx || tr('missingUserCtx'))
           .replaceAll('{repo_name}', repo.name)
           .replaceAll('{branch}', branch)
           .replaceAll('{file_list}', '- ' + tr('stagedPlaceholder'))
           .replaceAll('{staged_diff}', tr('stagedDiffPlaceholder'))
 
         const onSave = async () => {
-          if (!sysPrompt.trim()) { pushToast('error', tr('validationNoSys')); return }
-          if (!userCtx.trim()) { pushToast('error', tr('validationNoUser')); return }
+          if (!buf.sysPrompt.trim()) { pushToast('error', tr('validationNoSys')); return }
+          if (!buf.userCtx.trim()) { pushToast('error', tr('validationNoUser')); return }
           setSaving(true)
           try {
-            const yaml = emitRulesYaml({ system_prompt: sysPrompt, user_context: userCtx })
-            const r = await callRpc('rulesSave', { repoId: repo.id, scope: repoOnly ? 'repo' : 'global', yaml })
+            const yaml = emitRulesYaml({ system_prompt: buf.sysPrompt, user_context: buf.userCtx })
+            const r = await callRpc('rulesSave', { repoId: repo.id, scope, yaml })
             if (r && r.ok) { pushToast('success', r.summary || tr('saved')); onClose() }
             else pushToast('error', (r && r.error) || tr('saveFailed'))
           } catch (e) { pushToast('error', fmt(tr('saveFailedWith'), { e: e && e.message ? e.message : String(e) })) }
           finally { setSaving(false) }
         }
         const onRestoreDefault = () => {
-          callRpc('rulesGet', { repoId: repo.id }).then((r) => {
-            if (r && r.ok) {
-              const fields = parseRulesYaml(r.defaultYaml)
-              setSysPrompt(fields.system_prompt || '')
-              setUserCtx(fields.user_context || '')
-              pushToast('info', tr('restoredDefaults'))
-            }
-          }).catch(() => {})
+          patchBuf({ sysPrompt: defaults.sysPrompt, userCtx: defaults.userCtx })
+          pushToast('info', tr('restoredDefaults'))
         }
 
         const fieldEditor = (keyName, label, value, setValue) =>
@@ -578,20 +586,27 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
             React.createElement('textarea', { className: 'gp-rule-input', value, spellCheck: false, onChange: (e) => setValue(e.target.value) }))
 
         const body = React.createElement('div', { className: 'gp-modal-body' },
-          React.createElement('div', { className: 'gp-toggle-row' },
-            React.createElement('input', { type: 'checkbox', checked: repoOnly, onChange: (e) => setRepoOnly(e.target.checked) }),
-            React.createElement('span', null, fmt(tr('repoOnlyLabel'), { name: repo.name }))),
+          React.createElement('div', { className: 'gp-rule-scope' },
+            React.createElement('label', { title: tr('globalRules') },
+              React.createElement('input', { type: 'checkbox', checked: scope === 'global', onChange: () => setScope('global') }),
+              React.createElement('span', null, tr('globalRules'))),
+            React.createElement('label', { title: tr('repoRules') },
+              React.createElement('input', { type: 'checkbox', checked: scope === 'repo', onChange: () => setScope('repo') }),
+              React.createElement('span', null, tr('repoRules')))),
+          React.createElement('div', { className: 'gp-rule-scope-hint', title: paths[scope] },
+            fmt(tr('scopeSaveTo'), { p: paths[scope] || tr('loading') }),
+            scope === 'repo' && !repoExists ? tr('scopeNewFile') : null),
           React.createElement('div', { className: 'gp-rule-cols' },
             React.createElement('div', { className: 'gp-rule-col' },
               React.createElement('div', { className: 'gp-rule-col-title' }, tr('rulesContent')),
               React.createElement('div', { className: 'gp-rule-fields' },
-                fieldEditor('system_prompt', tr('sysPromptLabel'), sysPrompt, setSysPrompt),
-                fieldEditor('user_context', tr('userCtxLabel'), userCtx, setUserCtx))),
+                fieldEditor('system_prompt', tr('sysPromptLabel'), buf.sysPrompt, (v) => patchBuf({ sysPrompt: v })),
+                fieldEditor('user_context', tr('userCtxLabel'), buf.userCtx, (v) => patchBuf({ userCtx: v })))),
             React.createElement('div', { className: 'gp-rule-col' },
               React.createElement('div', { className: 'gp-rule-col-title' }, tr('livePreview')),
               React.createElement('div', { className: 'gp-rule-preview' },
                 React.createElement('div', { className: 'gp-rule-preview-title' }, 'SYSTEM PROMPT'),
-                sysPrompt || tr('empty'),
+                buf.sysPrompt || tr('empty'),
                 React.createElement('div', { className: 'gp-rule-preview-title' }, tr('userCtxTitle')),
                 previewUser))))
 
@@ -893,7 +908,6 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const [rulesInfo, setRulesInfo] = React.useState(null)
         const [openRules, setOpenRules] = React.useState(false)
         const [openGenModel, setOpenGenModel] = React.useState(false)
-        const [rulesScope, setRulesScope] = React.useState('global')
         // 当前生效的生成模型（用于菜单显示 + 生成按钮 hover 提示）；null=跟随会话
         const [genModel, setGenModel] = React.useState(null)
         const loadGenModel = React.useCallback(() => {
@@ -978,10 +992,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         }
 
         const rulesMenu = rulesMenuOpen ? React.createElement('div', { className: 'gp-menu', style: { right: 'auto', left: 0 } },
-          React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); setRulesScope('global'); setOpenRules(true) } }, tr('editRules')),
-          React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); setRulesScope('repo'); setOpenRules(true) } }, tr('setRepoRules')),
-          React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); callRpc('rulesReset', { repoId: repo.id, scope: 'global' }).then((r) => pushToast(r && r.ok ? 'success' : 'error', r && r.ok ? (r.summary || tr('resetDone')) : (r && r.error) || tr('resetFailed'))).catch(() => pushToast('error', tr('resetFailed'))) } }, tr('resetGlobalRules')),
-          rulesInfo && rulesInfo.repoRuleExists ? React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); callRpc('rulesReset', { repoId: repo.id, scope: 'repo' }).then((r) => pushToast(r && r.ok ? 'success' : 'error', r && r.ok ? (r.summary || tr('resetDone')) : (r && r.error) || tr('resetFailed'))).catch(() => pushToast('error', tr('resetFailed'))) } }, tr('resetRepoRules')) : null,
+          React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); setOpenRules(true) } }, tr('editRules')),
           React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); callRpc('rulesCopy', { repoId: repo.id }).then((r) => pushToast(r && r.ok ? 'success' : 'error', r && r.ok ? (r.summary || tr('copied')) : (r && r.error) || tr('copyFailed'))).catch(() => pushToast('error', tr('copyFailed'))) } }, tr('copyRules')),
           React.createElement('div', { className: 'gp-menu-sep' }),
           React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); setOpenGenModel(true) } }, tr('genModelConfig')),
@@ -1009,7 +1020,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               busy === 'push' ? React.createElement('span', { className: 'gp-spinner' }) : icon('arrowUp'),
               busy === 'push' ? tr('pushing') : tr('commitAndPush'))),
           rulesMenuOpen ? React.createElement('div', { className: 'gp-menu-backdrop', onClick: (e) => { e.stopPropagation(); setRulesMenuOpen(false) } }) : null,
-          openRules ? React.createElement(RuleEditorModal, { repo, scope: rulesScope, onClose: () => setOpenRules(false) }) : null,
+          openRules ? React.createElement(RuleEditorModal, { repo, onClose: () => setOpenRules(false) }) : null,
           openGenModel ? React.createElement(GenModelModal, { onClose: () => setOpenGenModel(false), onSaved: () => loadGenModel() }) : null)
       }
 
