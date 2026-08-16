@@ -14,6 +14,9 @@
  *   - 提交区位于仓库卡片顶部（message 输入框在上，变更列表在下）；
  *   - 历史区加大：行高 26 / 字号 13 / 高度 470，节点更大更清晰；
  *     图谱按 lane 循环配色、合并线为圆角肘形曲线，提交详情改为行悬停浮层（VS Code hover 风格）；
+ *   - 点击文件从面板左缘滑出浮层 diff 抽屉（覆盖在聊天区上方，文件列表保持可见可
+ *     直接切换文件）：双列行号、整行柔和红绿底色、sticky 分段头、+增/−删 统计徽标、
+ *     自动换行开关；抽屉左缘可拖拽调宽（记忆在 localStorage），Esc / 点遮罩关闭；
  *   - 面板左缘可拖拽调整整体宽度，宽度记忆在 localStorage。
  *
  * 组件映射（原 TSX 设计 → 本实现）：
@@ -22,7 +25,7 @@
  *   CommitArea.tsx      → CommitArea（提交输入 + 生成 + 规则 + 提交/提交并推送，仅处理 staged）
  *   CommitRuleEditor.tsx→ RuleEditorModal（system_prompt / user_context 双编辑框（键名固定防误删）+ 实时预览 + 顶部 全局/仓库 双 checkbox 互斥切换）
  *   GitGraph.tsx        → GitGraphView（SVG 图谱：lane 配色/圆角合并线 + 悬停详情浮层）
- *   DiffPreview.tsx     → DiffPane（右侧只读 diff 预览）
+ *   DiffPreview.tsx     → DiffDrawer（面板左缘滑出的浮层 diff 查看器）
  *
  * Slot 注入：
  *   sidebar.footer.action  → git-panel-toggle（侧栏底部开关按钮）
@@ -199,15 +202,49 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-cd-meta { color: var(--dsw-alias-label-secondary); font-size: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--dsw-alias-border-l1); margin-bottom: 6px; }
 .gp-cd-message { white-space: pre-wrap; word-break: break-word; margin-bottom: 8px; }
 .gp-cd-stat { white-space: pre-wrap; font-family: monospace; font-size: 12px; color: var(--dsw-alias-label-secondary); }
-.gp-diff-pane { flex: 0 0 46%; min-width: 300px; display: flex; flex-direction: column; border-left: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
-.gp-diff-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--dsw-alias-border-l1); font-family: monospace; font-size: 13px; flex: 0 0 auto; }
-.gp-diff-body { flex: 1; overflow: auto; padding: 8px 10px; }
-.gp-diff-pre { margin: 0; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
-.gp-diff-add { color: var(--dsw-alias-state-success-primary); }
-.gp-diff-del { color: var(--dsw-alias-state-error-primary); }
-.gp-diff-hunk { color: var(--dsw-alias-brand-primary); }
-.gp-diff-hdr { color: var(--dsw-alias-label-secondary); font-weight: 600; }
-.gp-diff-plain { color: var(--dsw-alias-label-secondary); }
+/* ===== Diff 查看器：从面板左缘滑出的浮层抽屉（z 层级低于面板菜单/模态/通知） ===== */
+.gp-diff-backdrop { position: fixed; top: 0; bottom: 0; left: 0; background: rgba(0,0,0,.22); z-index: 54; pointer-events: auto; animation: gp-fade-in .16s ease-out; }
+@keyframes gp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.gp-diff-drawer { position: fixed; top: 0; bottom: 0; background: var(--dsw-alias-bg-layer-1); border-left: 1px solid var(--dsw-alias-border-l1); box-shadow: -14px 0 40px rgba(0,0,0,.28); display: flex; flex-direction: column; z-index: 56; pointer-events: auto; animation: gp-drawer-in .18s ease-out; font-size: 13px; color: var(--dsw-alias-label-primary); }
+@keyframes gp-drawer-in { from { transform: translateX(56px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.gp-diff-resize { position: absolute; top: 0; left: -2px; bottom: 0; width: 6px; cursor: ew-resize; z-index: 5; }
+.gp-diff-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; transform: translateX(-50%); background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .15s; }
+.gp-diff-resize:hover::after { opacity: .35; }
+.gp-diff-resize-active::after, .gp-diff-resize-active:hover::after { opacity: .6; }
+.gp-diff-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-specific-sidebar-fill); flex: 0 0 auto; }
+.gp-diff-glyph { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; font-family: 'Cascadia Mono', Consolas, monospace; }
+.gp-diff-glyph.gp-g-added { color: var(--dsw-alias-state-success-primary); background: rgba(46,160,67,.16); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent); }
+.gp-diff-glyph.gp-g-modified { color: var(--dsw-alias-state-warn-primary); background: rgba(215,166,72,.16); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); }
+.gp-diff-glyph.gp-g-deleted { color: var(--dsw-alias-state-error-primary); background: rgba(248,81,73,.14); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent); }
+.gp-diff-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 0 1 auto; }
+.gp-diff-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-diff-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.gp-diff-stats { display: inline-flex; gap: 8px; flex: 0 0 auto; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
+.gp-diff-stat-add { color: var(--dsw-alias-state-success-primary); font-weight: 700; }
+.gp-diff-stat-del { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
+.gp-btn-icon.gp-on { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
+.gp-diff-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
+/* 表格容器：min-width 100% 保证行底色铺满视口宽，width max-content 让长行撑出横向滚动 */
+.gp-diff-table { min-width: 100%; width: max-content; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.55; padding-bottom: 10px; }
+.gp-diff-table.gp-dt-wrap { width: 100%; }
+.gp-diff-meta { padding: 7px 12px; color: var(--dsw-alias-label-tertiary); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; border-bottom: 1px dashed var(--dsw-alias-border-l1); }
+/* @@ 分段头：sticky 吸附在滚动容器顶，实底色盖住滚过的内容 */
+.gp-diff-hrow { position: sticky; top: 0; z-index: 2; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-brand-primary); font-size: 12px; padding: 3px 12px; border-top: 1px solid var(--dsw-alias-border-l1); border-bottom: 1px solid var(--dsw-alias-border-l1); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.gp-diff-row { display: flex; }
+.gp-diff-row.gp-dr-ctx:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.gp-diff-row.gp-dr-add { background: rgba(46,160,67,.12); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); }
+.gp-diff-row.gp-dr-add:hover { background: rgba(46,160,67,.18); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 18%, transparent); }
+.gp-diff-row.gp-dr-del { background: rgba(248,81,73,.10); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent); }
+.gp-diff-row.gp-dr-del:hover { background: rgba(248,81,73,.16); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent); }
+.gp-diff-ln { flex: 0 0 46px; padding: 0 7px; text-align: right; color: var(--dsw-alias-label-tertiary); user-select: none; border-right: 1px solid var(--dsw-alias-border-l1); font-size: 11.5px; }
+.gp-dr-add .gp-diff-ln { background: rgba(46,160,67,.10); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); }
+.gp-dr-del .gp-diff-ln { background: rgba(248,81,73,.08); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent); }
+.gp-diff-code { flex: 1; min-width: 0; white-space: pre; padding: 0 12px 0 0; tab-size: 4; }
+.gp-dt-wrap .gp-diff-code { white-space: pre-wrap; word-break: break-all; }
+.gp-diff-sign { display: inline-block; width: 2ch; text-align: center; user-select: none; }
+.gp-dr-add .gp-diff-sign { color: var(--dsw-alias-state-success-primary); font-weight: 700; }
+.gp-dr-del .gp-diff-sign { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
+.gp-diff-row.gp-dr-note .gp-diff-code { color: var(--dsw-alias-label-tertiary); font-style: italic; }
 .gp-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 400; pointer-events: auto; }
 .gp-modal { background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; width: 1180px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
 .gp-modal-sm { width: 440px; }
@@ -267,6 +304,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         chevronDown: { p: ['M3.5 6L8 10.5 12.5 6'] },
         close: { p: ['M4.2 4.2l7.6 7.6', 'M11.8 4.2l-7.6 7.6'] },
         back: { p: ['M10 3.2L5.2 8 10 12.8'] },
+        // 自动换行（↩ 形回旋箭头：两行文本 + 第二行末尾折返箭头）
+        wrap: { p: ['M2.5 4h11', 'M2.5 8h6.5a2.5 2.5 0 0 1 0 5H7.6', 'M9.2 10.7L7 13l2.2 2.3'] },
         check: { p: ['M2.8 8.7l3.4 3.4L13.2 4.8'] },
         // VS Code codicon「refresh」官方路径（填充字形，环形箭头）
         // 来源：https://github.com/microsoft/vscode-codicons/blob/main/src/icons/refresh.svg
@@ -316,6 +355,16 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
       function savePanelW(w) {
         try { window.localStorage.setItem('gp-panel-w', String(w)) } catch (e) { /* ignore */ }
       }
+      function loadDiffW() {
+        try {
+          const v = parseInt(window.localStorage.getItem('gp-diff-w'), 10)
+          if (v >= 380 && v <= 2400) return v
+        } catch (e) { /* ignore */ }
+        return 0
+      }
+      function saveDiffW(w) {
+        try { window.localStorage.setItem('gp-diff-w', String(w)) } catch (e) { /* ignore */ }
+      }
 
       function createStore(initial) {
         let state = initial
@@ -344,6 +393,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           stagedDiffPlaceholder: '<点击「生成」时实时注入的 staged diff>', restoreDefaults: '恢复默认', cancel: '取消',
           saving: '保存中…', save: '保存', ruleEditorTitle: '提交规则编辑器 — {name}', close: '关闭',
           loadFailed: '读取失败', backToChanges: '返回变更列表', back: '返回', loadingDiff: '加载 diff…',
+          toggleWrap: '切换自动换行', closeDiff: '关闭 diff（Esc）',
           historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
           stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', generated: '已生成提交信息（规则来源：{s}）',
           ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}',
@@ -387,6 +437,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           stagedDiffPlaceholder: '<staged diff injected live when you click Generate>', restoreDefaults: 'Restore Defaults', cancel: 'Cancel',
           saving: 'Saving…', save: 'Save', ruleEditorTitle: 'Commit Rule Editor — {name}', close: 'Close',
           loadFailed: 'Failed to load', backToChanges: 'Back to changes', back: 'Back', loadingDiff: 'Loading diff…',
+          toggleWrap: 'Toggle word wrap', closeDiff: 'Close diff (Esc)',
           historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
           stageFirst: 'Stage files first using the + on the right of each file', generated: 'Commit message generated (rules: {s})',
           ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}',
@@ -509,12 +560,40 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const indent = (s) => String(s || '').split('\n').map((l) => (l === '' ? '' : '  ' + l)).join('\n')
         return 'system_prompt: |\n' + indent(rules.system_prompt) + '\n\nuser_context: |\n' + indent(rules.user_context) + '\n'
       }
-      function diffLineClass(line) {
-        if (line.startsWith('+++') || line.startsWith('---')) return 'gp-diff-hdr'
-        if (line.startsWith('@@')) return 'gp-diff-hunk'
-        if (line.startsWith('+')) return 'gp-diff-add'
-        if (line.startsWith('-')) return 'gp-diff-del'
-        return 'gp-diff-plain'
+      // unified diff 解析：拆出文件头元信息（meta）、@@ 分段（含旧/新行号计数的行序列）、
+      // 以及 hunk 之外的杂散行（未跟踪目录列表 / 无 diff / 二进制提示）。
+      // 行对象：{ t: 'add'|'del'|'ctx'|'note', o: 旧行号|null, n: 新行号|null, x: 去掉前导符的文本 }
+      function parseDiff(text) {
+        const meta = []
+        const blocks = []
+        let cur = null
+        let oldNo = 0, newNo = 0
+        let adds = 0, dels = 0
+        const lines = String(text || '').split('\n')
+        for (const raw of lines) {
+          if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(raw)) {
+            const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw)
+            oldNo = parseInt(m[1], 10); newNo = parseInt(m[2], 10)
+            cur = { hunk: raw, rows: [] }
+            blocks.push(cur)
+            continue
+          }
+          if (cur) {
+            if (raw.startsWith('+')) { cur.rows.push({ t: 'add', o: null, n: newNo++, x: raw.slice(1) }); adds++ }
+            else if (raw.startsWith('-')) { cur.rows.push({ t: 'del', o: oldNo++, n: null, x: raw.slice(1) }); dels++ }
+            else if (raw.startsWith('\\')) cur.rows.push({ t: 'note', o: null, n: null, x: raw })
+            else cur.rows.push({ t: 'ctx', o: oldNo++, n: newNo++, x: raw.length ? raw.slice(1) : '' })
+            continue
+          }
+          if (/^(diff --git|index |--- |\+\+\+ |(?:new|deleted) file mode|old mode|new mode|similarity index|dissimilarity index|rename from|rename to|copy from|copy to|Binary files|GIT binary patch)/.test(raw)) { meta.push(raw); continue }
+          if (raw === '') continue
+          if (!blocks.length || blocks[blocks.length - 1].hunk !== null) blocks.push({ hunk: null, rows: [] })
+          const b = blocks[blocks.length - 1]
+          if (raw.startsWith('+')) { b.rows.push({ t: 'add', o: null, n: null, x: raw.slice(1) }); adds++ }
+          else if (raw.startsWith('-')) { b.rows.push({ t: 'del', o: null, n: null, x: raw.slice(1) }); dels++ }
+          else b.rows.push({ t: 'ctx', o: null, n: null, x: raw })
+        }
+        return { meta, blocks, adds, dels }
       }
 
       function ToastLayer() {
@@ -625,26 +704,105 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
             foot))
       }
 
-      function DiffPane({ repo, path, group, onClose }) {
+      // DiffDrawer：点击文件后从面板左缘向左滑出的浮层查看器。
+      //   - 抽屉右缘与面板左缘齐平（覆盖在聊天区上方），文件列表保持可见，点别的文件直接切换；
+      //   - 遮罩仅覆盖抽屉左侧区域（聊天区），点击遮罩或按 Esc 关闭；
+      //   - 左缘拖拽调宽，宽度记忆在 localStorage（gp-diff-w）。
+      function DiffDrawer({ repo, sel, panelW, onClose }) {
         const [state, setState] = React.useState({ loading: true, text: '', error: '' })
+        const [wrap, setWrap] = React.useState(false)
+        const [drawerW, setDrawerW] = React.useState(() => loadDiffW() || Math.min(760, Math.max(440, Math.round(window.innerWidth * 0.42))))
+        const [resizing, setResizing] = React.useState(false)
+        const resizeRef = React.useRef(false)
+        const wRef = React.useRef(drawerW)
+
         React.useEffect(() => {
           let alive = true
-          callRpc('fileDiff', { repoId: repo.id, path, group }).then((r) => {
+          setState({ loading: true, text: '', error: '' })
+          callRpc('fileDiff', { repoId: repo.id, path: sel.path, group: sel.group }).then((r) => {
             if (!alive) return
-            if (r && r.ok) setState({ loading: false, text: r.text, error: '' })
+            if (r && r.ok) setState({ loading: false, text: r.text || '', error: '' })
             else setState({ loading: false, text: '', error: (r && r.error) || tr('loadFailed') })
           }).catch((e) => { if (alive) setState({ loading: false, text: '', error: e && e.message ? e.message : String(e) }) })
           return () => { alive = false }
-        }, [repo.id, path, group])
-        const lines = state.text.split('\n').map((l, i) => React.createElement('span', { key: i, className: diffLineClass(l) }, l, '\n'))
+        }, [repo.id, sel.path, sel.group])
+
+        React.useEffect(() => {
+          const onKey = (e) => { if (e.key === 'Escape') onClose() }
+          window.addEventListener('keydown', onKey)
+          return () => window.removeEventListener('keydown', onKey)
+        }, [onClose])
+
+        // 抽屉左缘拖拽调宽：宽度 = 视口宽 − 面板宽 − 指针 x，松手时持久化
+        React.useEffect(() => {
+          const onMove = (e) => {
+            if (!resizeRef.current) return
+            const max = Math.max(320, Math.round(window.innerWidth - panelW - 48))
+            const w = Math.min(max, Math.max(380, Math.round(window.innerWidth - panelW - e.clientX)))
+            wRef.current = w
+            setDrawerW((prev) => (prev === w ? prev : w))
+          }
+          const onUp = () => {
+            if (!resizeRef.current) return
+            resizeRef.current = false
+            setResizing(false)
+            saveDiffW(wRef.current)
+          }
+          window.addEventListener('pointermove', onMove)
+          window.addEventListener('pointerup', onUp)
+          return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
+        }, [panelW])
+
+        const parsed = React.useMemo(() => parseDiff(state.text), [state.text])
+        const gl = glyphOf(sel.x, sel.y)
+        const trimmed = sel.path.replace(/\/+$/, '')
+        const seg = trimmed.split('/').pop() || sel.path
+        const base = sel.path.endsWith('/') ? seg + '/' : seg
+        const dir = trimmed.length > seg.length ? trimmed.slice(0, trimmed.length - seg.length).replace(/\/+$/, '') : ''
+        // 面板调宽/窗口变窄时保持抽屉不越过视口左缘
+        const wEff = Math.min(drawerW, Math.max(320, Math.round(window.innerWidth - panelW - 48)))
+
+        const renderRow = (r, i) => React.createElement('div', { key: i, className: 'gp-diff-row gp-dr-' + r.t },
+          React.createElement('span', { className: 'gp-diff-ln' }, r.o == null ? '' : r.o),
+          React.createElement('span', { className: 'gp-diff-ln' }, r.n == null ? '' : r.n),
+          React.createElement('span', { className: 'gp-diff-code' },
+            React.createElement('span', { className: 'gp-diff-sign' }, r.t === 'add' ? '+' : r.t === 'del' ? '-' : r.t === 'ctx' ? ' ' : ''),
+            r.x))
+
         const head = React.createElement('div', { className: 'gp-diff-head' },
-          React.createElement('button', { className: 'gp-btn-icon', onClick: onClose, title: tr('backToChanges') }, icon('back'), tr('back')),
-          React.createElement('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, path),
+          React.createElement('span', { className: 'gp-diff-glyph ' + gl.cls }, gl.g),
+          React.createElement('div', { className: 'gp-diff-title', title: sel.path },
+            React.createElement('span', { className: 'gp-diff-name' }, base),
+            dir ? React.createElement('span', { className: 'gp-diff-dir' }, dir) : null),
+          !state.loading && !state.error && (parsed.adds > 0 || parsed.dels > 0) ? React.createElement('span', { className: 'gp-diff-stats' },
+            parsed.adds > 0 ? React.createElement('span', { className: 'gp-diff-stat-add' }, '+' + parsed.adds) : null,
+            parsed.dels > 0 ? React.createElement('span', { className: 'gp-diff-stat-del' }, '−' + parsed.dels) : null) : null,
           React.createElement('span', { className: 'gp-spacer' }),
-          React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: 12 } }, GROUP_META[group] ? tr(GROUP_META[group].titleKey) : group))
+          React.createElement('span', { className: 'gp-chip' }, GROUP_META[sel.group] ? tr(GROUP_META[sel.group].titleKey) : sel.group),
+          React.createElement('button', { className: 'gp-btn-icon' + (wrap ? ' gp-on' : ''), title: tr('toggleWrap'), onClick: () => setWrap((w) => !w) }, icon('wrap')),
+          React.createElement('button', { className: 'gp-btn-icon', title: tr('closeDiff'), onClick: onClose }, icon('close')))
+
         const body = React.createElement('div', { className: 'gp-diff-body' },
-          state.loading ? React.createElement('div', { className: 'gp-empty' }, tr('loadingDiff')) : state.error ? React.createElement('div', { className: 'gp-empty' }, state.error) : React.createElement('pre', { className: 'gp-diff-pre' }, lines))
-        return React.createElement('div', { className: 'gp-diff-pane' }, head, body)
+          state.loading
+            ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), ' ' + tr('loadingDiff'))
+            : state.error
+              ? React.createElement('div', { className: 'gp-empty' }, state.error)
+              : React.createElement('div', { className: 'gp-diff-table' + (wrap ? ' gp-dt-wrap' : '') },
+                  parsed.meta.length ? React.createElement('div', { className: 'gp-diff-meta' }, parsed.meta.join('\n')) : null,
+                  parsed.blocks.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
+                    b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
+                    b.rows.map(renderRow)))))
+
+        return React.createElement(React.Fragment, null,
+          React.createElement('div', { className: 'gp-diff-backdrop', style: { right: (panelW + wEff) + 'px' }, onClick: onClose }),
+          React.createElement('div', { className: 'gp-diff-drawer', style: { right: panelW + 'px', width: wEff + 'px' } },
+            React.createElement('div', {
+              className: 'gp-diff-resize' + (resizing ? ' gp-diff-resize-active' : ''),
+              title: tr('resizeTitle'),
+              onPointerDown: (e) => { e.preventDefault(); resizeRef.current = true; setResizing(true) }
+            }),
+            head,
+            body))
       }
 
       // 简易 lane 图算法（VS Code 风格）：按行计算提交所在的 lane、合并连线与活跃 lane 区间
@@ -1191,7 +1349,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               const seg = trimmed.split('/').pop() || f.path
               const base = f.path.endsWith('/') ? seg + '/' : seg
               const dir = trimmed.length > seg.length ? trimmed.slice(0, trimmed.length - seg.length).replace(/\/+$/, '') : ''
-              return React.createElement('div', { className: 'gp-file-row', key: group + ':' + f.path, title: f.path, onClick: () => onOpenDiff(repo, f.path, group) },
+              return React.createElement('div', { className: 'gp-file-row', key: group + ':' + f.path, title: f.path, onClick: () => onOpenDiff(repo, f, group) },
                 React.createElement('span', { className: 'gp-file-dot ' + gl.cls }, '•'),
                 React.createElement('span', { className: 'gp-file-name' }, base),
                 dir ? React.createElement('span', { className: 'gp-file-dir' }, dir) : null,
@@ -1375,12 +1533,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
         }, [])
 
+        // 面板关闭时同步关闭 diff 抽屉，避免下次打开面板时残留上次的 diff 选择
+        React.useEffect(() => { if (!s.panelOpen) setDiffSel(null) }, [s.panelOpen])
+
         if (!s.panelOpen) return null
         const diffRepo = diffSel ? scan.repos.find((r) => r.id === diffSel.repoId) : null
-        // diff 打开时在用户宽度基础上自动加宽（不超过视口 96%）
-        const effW = diffSel && diffRepo
-          ? Math.min(Math.round(window.innerWidth * 0.96), Math.max(860, s.panelW + 470))
-          : s.panelW
 
         const header = React.createElement('div', { className: 'gp-header' },
           React.createElement('span', { className: 'gp-title' }, icon('branch', 15), 'Git Panel'),
@@ -1396,18 +1553,18 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           scan.state === 'scanning' || scan.state === 'idle' ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), scan.state === 'idle' ? ' ' + tr('locating') : ' ' + tr('scanning')) :
             scan.state === 'error' ? React.createElement('div', { className: 'gp-empty' }, scan.error) :
               scan.repos.length === 0 ? React.createElement('div', { className: 'gp-empty' }, tr('noRepos')) :
-                scan.repos.map((r) => React.createElement(RepoCard, { key: r.id, repo: r, sessionId, onOpenDiff: (repo, path, group) => setDiffSel({ repoId: repo.id, path, group }) })))
+                scan.repos.map((r) => React.createElement(RepoCard, { key: r.id, repo: r, sessionId, onOpenDiff: (repo, f, group) => setDiffSel({ repoId: repo.id, path: f.path, group, x: f.x, y: f.y }) })))
 
-        return React.createElement('div', { className: 'gp-panel', style: { width: effW + 'px' } },
-          React.createElement('div', {
-            className: 'gp-resize' + (resizing ? ' gp-resize-active' : ''),
-            title: tr('resizeTitle'),
-            onPointerDown: (e) => { e.preventDefault(); resizeRef.current = true; setResizing(true) }
-          }),
-          header,
-          React.createElement('div', { className: 'gp-main' },
-            body,
-            diffSel && diffRepo ? React.createElement(DiffPane, { repo: diffRepo, path: diffSel.path, group: diffSel.group, onClose: () => setDiffSel(null) }) : null))
+        return React.createElement(React.Fragment, null,
+          React.createElement('div', { className: 'gp-panel', style: { width: s.panelW + 'px' } },
+            React.createElement('div', {
+              className: 'gp-resize' + (resizing ? ' gp-resize-active' : ''),
+              title: tr('resizeTitle'),
+              onPointerDown: (e) => { e.preventDefault(); resizeRef.current = true; setResizing(true) }
+            }),
+            header,
+            React.createElement('div', { className: 'gp-main' }, body)),
+          diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: s.panelW, onClose: () => setDiffSel(null) }) : null)
       }
 
       slots.inject('shell.overlay', () => slots.register(

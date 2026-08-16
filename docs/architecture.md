@@ -39,7 +39,8 @@
 
 Client 内主要组件：`GitPanelMain`（主面板/扫描/工作空间跟随/拖拽调宽）、
 `RepoCard`（仓库卡片 + 分支/更多菜单）、`CommitArea`（提交区）、`RuleEditorModal`
-（规则编辑器）、`GitGraphView`（历史图谱）、`DiffPane`（diff 预览），以及确认弹窗与
+（规则编辑器）、`GitGraphView`（历史图谱）、`DiffDrawer`（面板左缘滑出的浮层 diff
+查看器：双列行号 + 整行底色 + sticky 分段头），以及确认弹窗与
 Toast 通知栈。
 
 ## 运行时依赖
