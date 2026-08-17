@@ -23,7 +23,9 @@
  *     修饰键点击不切换 diff），选中行同样带选中盒；多选后点击任一选中行的 放弃/暂存/取消暂存
  *     按钮即作用于全部选中文件（放弃仍弹确认），点击未选中行的按钮仅作用于该行；
  *     操作成功或文件移组后自动剪掉失效的选中项；
- *   - 面板左缘可拖拽调整整体宽度，宽度记忆在 localStorage。
+ *   - 面板左缘可拖拽调整整体宽度，宽度记忆在 localStorage；
+ *   - 点击标题折叠为右侧 44px 竖条、点击竖条展开：面板与竖条交叉滑入/滑出
+ *     （translateX 纯位移 + 双 rAF 入场，与 diff 抽屉同 240ms/曲线，动效播完才切换形态）。
  *
  * 组件映射（原 TSX 设计 → 本实现）：
  *   GitPanel.tsx        → GitPanelMain（主面板 + 扫描 + 工作空间跟随 + 拖拽调宽）
@@ -104,8 +106,8 @@ export default function () {
    提交详情浮层（复制 hash/message）、输入框（编辑文本）。完整路径悬停 title 仍可见。 */
 .gp-panel, .gp-diff-drawer, .gp-modal, .gp-toast { user-select: none; }
 .gp-diff-body, .gp-cd-pop, .gp-panel input, .gp-panel textarea, .gp-modal input, .gp-modal textarea { user-select: text; }
-.gp-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 96vw; background: var(--dsw-alias-bg-layer-1); border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; pointer-events: auto; z-index: 60; font-size: 14px; color: var(--dsw-alias-label-primary); box-shadow: -12px 0 32px rgba(0,0,0,.18); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; transition: width .18s ease; }
-/* 拖拽调宽期间关掉 width 过渡，避免跟手延迟；折叠/展开时才播放动效 */
+.gp-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 96vw; background: var(--dsw-alias-bg-layer-1); border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; pointer-events: auto; z-index: 60; font-size: 14px; color: var(--dsw-alias-label-primary); box-shadow: -12px 0 32px rgba(0,0,0,.18); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; transition: width .18s ease, transform .22s cubic-bezier(.2,.8,.2,1); }
+/* 拖拽调宽期间关掉 width 过渡，避免跟手延迟；折叠/展开时播放滑入/滑出动效（与 diff 抽屉同时长/曲线） */
 .gp-noanim { transition: none !important; }
 .gp-resize { position: absolute; top: 0; left: -2px; bottom: 0; width: 5px; cursor: ew-resize; z-index: 80; }
 .gp-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; transform: translateX(-50%); background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .15s; }
@@ -116,8 +118,9 @@ export default function () {
 /* 标题（logo + 文字）整体是可点按钮：点击折叠到侧栏。负 margin 抵消内边距，保持原排版不变 */
 .gp-title-btn { border: none; background: transparent; color: inherit; font-family: inherit; padding: 2px 6px; margin: -2px -6px; border-radius: 5px; cursor: pointer; }
 .gp-title-btn:hover { background: var(--dsw-alias-bg-layer-2); }
-/* 折叠态：右侧 44px 竖条，整条可点击展开；只露 logo 图标 + 竖排文字 */
-.gp-rail { position: fixed; top: 0; right: 0; bottom: 0; width: 44px; box-sizing: border-box; background: var(--dsw-specific-sidebar-fill); border: none; border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 11px 0; cursor: pointer; z-index: 60; color: var(--dsw-alias-label-primary); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; box-shadow: -6px 0 16px rgba(0,0,0,.10); }
+/* 折叠态：右侧 44px 竖条，整条可点击展开；只露 logo 图标 + 竖排文字；
+   折叠/展开时与面板交叉滑入/滑出（translateX 纯位移，类 diff 抽屉动效） */
+.gp-rail { position: fixed; top: 0; right: 0; bottom: 0; width: 44px; box-sizing: border-box; background: var(--dsw-specific-sidebar-fill); border: none; border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 11px 0; cursor: pointer; z-index: 60; color: var(--dsw-alias-label-primary); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; box-shadow: -6px 0 16px rgba(0,0,0,.10); transition: transform .22s cubic-bezier(.2,.8,.2,1); }
 .gp-rail:hover { background: var(--dsw-alias-bg-layer-2); }
 .gp-rail-label { writing-mode: vertical-rl; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: var(--dsw-alias-label-secondary); user-select: none; }
 .gp-rail:hover .gp-rail-label { color: var(--dsw-alias-label-primary); }
@@ -251,12 +254,15 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-diff-glyph.gp-g-added { color: var(--dsw-alias-state-success-primary); background: rgba(46,160,67,.16); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent); }
 .gp-diff-glyph.gp-g-modified { color: var(--dsw-alias-state-warn-primary); background: rgba(215,166,72,.16); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); }
 .gp-diff-glyph.gp-g-deleted { color: var(--dsw-alias-state-error-primary); background: rgba(248,81,73,.14); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent); }
-.gp-diff-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 0 1 auto; }
-/* 收缩优先级：文件名 flex:0 0 auto 永不先让路（仅超长时被 max-width 封顶省略），
-   路径 flex:1 1 auto + min-width:0 独自承担挤压；配合 direction:rtl 省略号落在左侧，
-   保住最靠近文件名的深层目录（…ooks/panel）。悬停 title 看完整路径。 */
-.gp-diff-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; max-width: 60%; }
-.gp-diff-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; flex: 1 1 auto; min-width: 0; }
+/* 标题框 flex:1 1 auto 吃掉头部全部剩余空间（旧版 flex:0 1 auto 内容定宽，配合文件名
+   max-width:60% 形成自参考封顶：目录越短标题框越窄，文件名被压到很小就省略，
+   头部明明很宽也被截断）。 */
+.gp-diff-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 1 1 auto; }
+/* 收缩优先级：目录 flex:0 1 auto + min-width:0 先让路（direction:rtl 省略号落左侧，
+   保住最深层目录，可收缩至完全消失）；文件名 flex:0 0 auto 不主动收缩，仅标题框
+   整体不够宽时才被 max-width:100% 封顶省略。悬停 title 看完整路径。 */
+.gp-diff-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; max-width: 100%; }
+.gp-diff-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; flex: 0 1 auto; min-width: 0; }
 .gp-diff-stats { display: inline-flex; gap: 8px; flex: 0 0 auto; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
 .gp-diff-stat-add { color: var(--dsw-alias-state-success-primary); font-weight: 700; }
 .gp-diff-stat-del { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
@@ -852,6 +858,9 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
             React.createElement('span', { className: 'gp-diff-sign' }, r.t === 'add' ? '+' : r.t === 'del' ? '-' : r.t === 'ctx' ? ' ' : ''),
             r.x))
 
+        // 头部布局：glyph | 标题框（flex:1 吃掉全部剩余空间）| +增/−删统计 | 组徽标 | 换行/关闭。
+        // 不设 spacer —— 标题框的 flex-grow 已把右侧元素整体推到最右（统计居右），
+        // 若再放 flex:1 的 spacer 会与标题框平分剩余空间，把统计挤到头部中段。
         const head = React.createElement('div', { className: 'gp-diff-head' },
           React.createElement('span', { className: 'gp-diff-glyph ' + gl.cls }, gl.g),
           React.createElement('div', { className: 'gp-diff-title', title: sel.path },
@@ -860,7 +869,6 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           !state.loading && !state.error && (parsed.adds > 0 || parsed.dels > 0) ? React.createElement('span', { className: 'gp-diff-stats' },
             parsed.adds > 0 ? React.createElement('span', { className: 'gp-diff-stat-add' }, '+' + parsed.adds) : null,
             parsed.dels > 0 ? React.createElement('span', { className: 'gp-diff-stat-del' }, '−' + parsed.dels) : null) : null,
-          React.createElement('span', { className: 'gp-spacer' }),
           React.createElement('span', { className: 'gp-chip' }, GROUP_META[sel.group] ? tr(GROUP_META[sel.group].titleKey) : sel.group),
           React.createElement('button', { className: 'gp-btn-icon' + (wrap ? ' gp-on' : ''), title: tr('toggleWrap'), onClick: () => setWrap((w) => !w) }, icon('wrap')),
           React.createElement('button', { className: 'gp-btn-icon', title: tr('closeDiff'), onClick: requestClose }, icon('close')))
@@ -1707,6 +1715,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         }, [])
         const [follow, setFollow] = React.useState(true)
         const [resizing, setResizing] = React.useState(false)
+        // 折叠/展开滑动动效（复用 DiffDrawer 的相位模式，与 diff 抽屉同 240ms/曲线）：
+        // 点击折叠不立即切换渲染形态，先进过渡相 —— 离场元素 translateX(100%) 右滑出屏、
+        // 进场元素从右缘屏外滑入，两者同时在场 ~240ms；动效播完才写入 collapsed
+        // （store + localStorage）并卸载离场元素。过渡相内忽略重复点击。
+        const [collAnim, setCollAnim] = React.useState(null) // null | { dir: 'collapse' | 'expand', entered: bool }
+        const collRafRef = React.useRef(0)
         const initialDoneRef = React.useRef(false)
         const resizeRef = React.useRef(false)
         // 扫描请求序列号：丢弃过期响应，防止「初始无 root 的慢扫描」晚到覆盖
@@ -1807,11 +1821,41 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         // 面板关闭时同步关闭 diff 抽屉，避免下次打开面板时残留上次的 diff 选择
         React.useEffect(() => { if (!s.panelOpen) setDiffSel(null) }, [s.panelOpen])
 
+        // 折叠/展开过渡相：双 rAF 先让进场元素的屏外初始帧完成一次绘制，再置 entered
+        // 触发 transition（与 DiffDrawer 入场同法，根治首帧以终态闪现的问题）
+        React.useEffect(() => {
+          if (!collAnim || collAnim.entered) return
+          collRafRef.current = requestAnimationFrame(() => {
+            collRafRef.current = requestAnimationFrame(() => setCollAnim((a) => (a ? { ...a, entered: true } : a)))
+          })
+          return () => cancelAnimationFrame(collRafRef.current)
+        }, [collAnim])
+
+        // 过渡相收尾：240ms 滑入/滑出动效播完（对齐 .22s 过渡）才真正切换折叠态
+        // （store + localStorage）并卸载离场元素；中途组件卸载则取消，不残留定时器
+        React.useEffect(() => {
+          if (!collAnim || !collAnim.entered) return
+          return timer.timeout(() => {
+            const toCollapsed = collAnim.dir === 'collapse'
+            saveCollapsed(toCollapsed)
+            store.set((st) => ({ ...st, collapsed: toCollapsed }))
+            setCollAnim(null)
+          }, 240)
+        }, [collAnim])
+
+        // 折叠：先关 diff 抽屉（旧语义保留），再进过渡相；过渡相内忽略重复点击
+        const startCollapse = () => {
+          if (collAnim) return
+          setDiffSel(null)
+          setCollAnim({ dir: 'collapse', entered: false })
+        }
+        const startExpand = () => { if (!collAnim) setCollAnim({ dir: 'expand', entered: false }) }
+
         if (!s.panelOpen) return null
         const diffRepo = diffSel ? scan.repos.find((r) => r.id === diffSel.repoId) : null
 
         const header = React.createElement('div', { className: 'gp-header' },
-          React.createElement('button', { className: 'gp-title gp-title-btn', title: tr('collapseTitle'), onClick: () => { saveCollapsed(true); setDiffSel(null); store.set((st) => ({ ...st, collapsed: true })) } }, icon('branch', 15), 'Git Panel'),
+          React.createElement('button', { className: 'gp-title gp-title-btn', title: tr('collapseTitle'), onClick: startCollapse }, icon('branch', 15), 'Git Panel'),
           follow ? React.createElement('span', { className: 'gp-chip gp-follow-chip', title: tr('followTitle') }, fmt(tr('followChip'), { s: wsTitle || (wsPath ? wsPath.split(/[\\/]/).filter(Boolean).pop() : '—') })) : null,
           !follow && wsPath ? React.createElement('button', { className: 'gp-btn', style: { fontSize: 11, padding: '2px 8px' }, title: tr('followResumeTitle'), onClick: () => { setFollow(true); doScan(wsPath) } }, tr('followResume')) : null,
           scan.root ? React.createElement('span', { className: 'gp-root', title: scan.root }, scan.root) : null,
@@ -1833,26 +1877,37 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
                     : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y })
                 })))
 
-        // 折叠态：渲染 44px 竖条（整条可点展开）。panelOpen 语义不变，自动刷新轮询继续；
-        // diff 抽屉在折叠时已关闭（折叠动作里 setDiffSel(null)），此处无需渲染
-        if (s.collapsed) {
-          return React.createElement('button', {
-            className: 'gp-rail', title: tr('expandTitle'),
-            onClick: () => { saveCollapsed(false); store.set((st) => ({ ...st, collapsed: false })) }
-          },
-            icon('branch', 16),
-            React.createElement('span', { className: 'gp-rail-label' }, 'Git Panel'))
-        }
+        // 折叠/展开渲染：稳态只渲染一种形态（panelOpen 语义不变，自动刷新轮询继续）；
+        // 过渡相内面板与竖条同时在场 —— 离场元素 translateX(100%) 右滑出屏（禁指针），
+        // 进场元素从右缘屏外滑入。diff 抽屉在折叠时已关闭（折叠动作里 setDiffSel(null)）。
+        const collDir = collAnim ? collAnim.dir : null
+        const collOn = !!(collAnim && collAnim.entered)
+        const panelOff = collDir === 'collapse' ? collOn : collDir === 'expand' ? !collOn : false
+        const railOff = collDir === 'collapse' ? !collOn : collDir === 'expand' ? collOn : false
+
+        const rail = (s.collapsed || collDir === 'collapse') ? React.createElement('button', {
+          className: 'gp-rail', title: tr('expandTitle'),
+          style: { transform: railOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'expand' ? 'none' : undefined },
+          onClick: startExpand
+        },
+          icon('branch', 16),
+          React.createElement('span', { className: 'gp-rail-label' }, 'Git Panel')) : null
+
+        const panel = (!s.collapsed || collDir === 'expand') ? React.createElement('div', {
+          className: 'gp-panel' + (resizing ? ' gp-noanim' : ''),
+          style: { width: s.panelW + 'px', transform: panelOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'collapse' ? 'none' : undefined }
+        },
+          React.createElement('div', {
+            className: 'gp-resize' + (resizing ? ' gp-resize-active' : ''),
+            title: tr('resizeTitle'),
+            onPointerDown: (e) => { e.preventDefault(); resizeRef.current = true; setResizing(true) }
+          }),
+          header,
+          React.createElement('div', { className: 'gp-main' }, body)) : null
 
         return React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'gp-panel' + (resizing ? ' gp-noanim' : ''), style: { width: s.panelW + 'px' } },
-            React.createElement('div', {
-              className: 'gp-resize' + (resizing ? ' gp-resize-active' : ''),
-              title: tr('resizeTitle'),
-              onPointerDown: (e) => { e.preventDefault(); resizeRef.current = true; setResizing(true) }
-            }),
-            header,
-            React.createElement('div', { className: 'gp-main' }, body)),
+          panel,
+          rail,
           diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: s.panelW, onClose: finishCloseDiff, onRequestClose: requestCloseDiff }) : null)
       }
 
