@@ -337,7 +337,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-toast-error { border-left-color: var(--dsw-alias-state-error-primary); }
 .gp-rule-scope { display: flex; align-items: center; gap: 22px; margin-bottom: 4px; font-size: 13px; }
 .gp-rule-scope label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
-.gp-rule-scope input { cursor: pointer; }
+.gp-rule-scope input { cursor: pointer; margin: 0; flex: none; align-self: center; }
 .gp-rule-scope-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); margin: 0 0 10px; font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gp-danger { color: var(--dsw-alias-state-error-primary); font-weight: 600; }
 .gp-confirm-summary { margin: 6px 0 10px; font-size: 13.5px; display: flex; align-items: flex-start; gap: 6px; }
@@ -443,12 +443,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           groupStaged: '暂存的更改', groupChanges: '更改', groupUntracked: '未跟踪的更改', history: '历史',
           rulesLoadFailed: '读取规则失败', reading: '(读取中…)', saved: '已保存', saveFailed: '保存失败', saveFailedWith: '保存失败: {e}',
           validationNoSys: '校验失败: 缺少 system_prompt', validationNoUser: '校验失败: 缺少 user_context',
-          restoredDefaults: '已恢复为内置默认内容（未保存）', globalRules: '全局规则', repoRules: '仓库规则', scopeSaveTo: '保存到: {p}', scopeNewFile: '（文件不存在，保存时创建）',
+          restoredDefaults: '已恢复为内置默认内容（未保存）', globalRules: '全局规则', repoRules: '仓库专属规则', scopeSaveTo: '保存到: {p}', scopeNewFile: '（文件不存在，保存时创建）',
           rulesContent: '规则内容', sysPromptLabel: '系统提示词（必填）', userCtxLabel: '用户上下文（必填）',
           livePreview: '实时预览（最终注入 LLM 的 prompt）', userCtxTitle: 'USER CONTEXT（占位符已替换）', userCtxPlaceholder: '（占位符已替换）',
           empty: '(空)', missingUserCtx: '(缺少 user_context)', stagedPlaceholder: '<已暂存的文件，生成时实时注入>',
           stagedDiffPlaceholder: '<点击「生成」时实时注入的 staged diff>', restoreDefaults: '恢复默认', cancel: '取消',
-          saving: '保存中…', save: '保存', ruleEditorTitle: '提交规则编辑器 — {name}', close: '关闭',
+          saving: '保存中…', save: '保存', ruleEditorTitle: '提交规则编辑器', close: '关闭',
           loadFailed: '读取失败', backToChanges: '返回变更列表', back: '返回', loadingDiff: '加载 diff…',
           toggleWrap: '切换自动换行', closeDiff: '关闭 diff（Esc）',
           historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
@@ -491,12 +491,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', history: 'History',
           rulesLoadFailed: 'Failed to load rules', reading: '(loading…)', saved: 'Saved', saveFailed: 'Save failed', saveFailedWith: 'Save failed: {e}',
           validationNoSys: 'Validation failed: missing system_prompt', validationNoUser: 'Validation failed: missing user_context',
-          restoredDefaults: 'Restored to built-in defaults (not saved)', globalRules: 'Global rules', repoRules: 'Repo rules', scopeSaveTo: 'Saved to: {p}', scopeNewFile: ' (file does not exist, will be created on save)',
+          restoredDefaults: 'Restored to built-in defaults (not saved)', globalRules: 'Global rules', repoRules: 'Repo-specific rules', scopeSaveTo: 'Saved to: {p}', scopeNewFile: ' (file does not exist, will be created on save)',
           rulesContent: 'Rule content', sysPromptLabel: 'system prompt (required)', userCtxLabel: 'user context (required)',
           livePreview: 'Live preview (the final prompt injected into the LLM)', userCtxTitle: 'USER CONTEXT (placeholders replaced)', userCtxPlaceholder: '(placeholders replaced)',
           empty: '(empty)', missingUserCtx: '(missing user_context)', stagedPlaceholder: '<staged files, injected live at generation>',
           stagedDiffPlaceholder: '<staged diff injected live when you click Generate>', restoreDefaults: 'Restore Defaults', cancel: 'Cancel',
-          saving: 'Saving…', save: 'Save', ruleEditorTitle: 'Commit Rule Editor — {name}', close: 'Close',
+          saving: 'Saving…', save: 'Save', ruleEditorTitle: 'Commit Rule Editor', close: 'Close',
           loadFailed: 'Failed to load', backToChanges: 'Back to changes', back: 'Back', loadingDiff: 'Loading diff…',
           toggleWrap: 'Toggle word wrap', closeDiff: 'Close diff (Esc)',
           historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
@@ -668,12 +668,14 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
       }
 
       function RuleEditorModal({ repo, onClose }) {
-        // 双缓冲：全局 / 仓库各一套编辑内容，切换 checkbox 不丢失未保存的修改
+        // 双缓冲：全局 / 仓库各一套编辑内容，切换 scope 不丢失未保存的修改
         const [buffers, setBuffers] = React.useState({ global: { sysPrompt: '', userCtx: '' }, repo: { sysPrompt: '', userCtx: '' } })
         const [defaults, setDefaults] = React.useState({ sysPrompt: '', userCtx: '' })
         const [paths, setPaths] = React.useState({ global: '', repo: '' })
         const [repoExists, setRepoExists] = React.useState(false)
-        const [scope, setScope] = React.useState('global')
+        // scope 初始为 null：等 rulesGet 返回后跟随当前生效来源（有仓库专属规则则落在 repo），
+        // 加载完成前 scope 切换禁用，避免先闪 global 再跳 repo
+        const [scope, setScope] = React.useState(null)
         const [loaded, setLoaded] = React.useState(false)
         const [saving, setSaving] = React.useState(false)
         const [branch, setBranch] = React.useState(tr('reading'))
@@ -690,14 +692,16 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               setDefaults({ sysPrompt: g.system_prompt || '', userCtx: g.user_context || '' })
               setPaths({ global: r.defaultPath || '', repo: r.repoPath || '' })
               setRepoExists(!!r.repoRuleExists)
+              setScope(r.repoRuleExists ? 'repo' : 'global')
               setLoaded(true)
             } else pushToast('error', (r && r.error) || tr('rulesLoadFailed'))
           }).catch((e) => pushToast('error', tr('rulesLoadFailed') + ': ' + (e && e.message ? e.message : String(e))))
           callRpc('status', { repoId: repo.id }).then((r) => { if (r && r.ok && r.branch) setBranch(r.branch) }).catch(() => {})
         }, [repo.id])
 
-        const buf = buffers[scope]
-        const patchBuf = (p) => setBuffers((b) => ({ ...b, [scope]: { ...b[scope], ...p } }))
+        const curScope = scope || 'global'
+        const buf = buffers[curScope]
+        const patchBuf = (p) => setBuffers((b) => ({ ...b, [curScope]: { ...b[curScope], ...p } }))
 
         const previewUser = (buf.userCtx || tr('missingUserCtx'))
           .replaceAll('{repo_name}', repo.name)
@@ -711,7 +715,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           setSaving(true)
           try {
             const yaml = emitRulesYaml({ system_prompt: buf.sysPrompt, user_context: buf.userCtx })
-            const r = await callRpc('rulesSave', { repoId: repo.id, scope, yaml })
+            const r = await callRpc('rulesSave', { repoId: repo.id, scope: curScope, yaml })
             if (r && r.ok) { pushToast('success', r.summary || tr('saved')); onClose() }
             else pushToast('error', (r && r.error) || tr('saveFailed'))
           } catch (e) { pushToast('error', fmt(tr('saveFailedWith'), { e: e && e.message ? e.message : String(e) })) }
@@ -732,14 +736,14 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const body = React.createElement('div', { className: 'gp-modal-body' },
           React.createElement('div', { className: 'gp-rule-scope' },
             React.createElement('label', { title: tr('globalRules') },
-              React.createElement('input', { type: 'checkbox', checked: scope === 'global', onChange: () => setScope('global') }),
+              React.createElement('input', { type: 'radio', name: 'gp-rule-scope', disabled: !loaded, checked: curScope === 'global', onChange: () => setScope('global') }),
               React.createElement('span', null, tr('globalRules'))),
             React.createElement('label', { title: tr('repoRules') },
-              React.createElement('input', { type: 'checkbox', checked: scope === 'repo', onChange: () => setScope('repo') }),
+              React.createElement('input', { type: 'radio', name: 'gp-rule-scope', disabled: !loaded, checked: curScope === 'repo', onChange: () => setScope('repo') }),
               React.createElement('span', null, tr('repoRules')))),
-          React.createElement('div', { className: 'gp-rule-scope-hint', title: paths[scope] },
-            fmt(tr('scopeSaveTo'), { p: paths[scope] || tr('loading') }),
-            scope === 'repo' && !repoExists ? tr('scopeNewFile') : null),
+          React.createElement('div', { className: 'gp-rule-scope-hint', title: paths[curScope] },
+            fmt(tr('scopeSaveTo'), { p: paths[curScope] || tr('loading') }),
+            curScope === 'repo' && !repoExists ? tr('scopeNewFile') : null),
           React.createElement('div', { className: 'gp-rule-cols' },
             React.createElement('div', { className: 'gp-rule-col' },
               React.createElement('div', { className: 'gp-rule-col-title' }, tr('rulesContent')),
@@ -763,7 +767,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           React.createElement('div', { className: 'gp-modal', onClick: (e) => e.stopPropagation() },
             React.createElement('div', { className: 'gp-modal-head' },
               icon('gear', 15),
-              React.createElement('span', { className: 'gp-spacer' }, fmt(tr('ruleEditorTitle'), { name: repo.name })),
+              React.createElement('span', { className: 'gp-spacer' }, tr('ruleEditorTitle')),
               React.createElement('button', { className: 'gp-btn-icon', onClick: onClose, title: tr('close') }, icon('close'))),
             body,
             foot))

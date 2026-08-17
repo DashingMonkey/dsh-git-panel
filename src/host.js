@@ -3,7 +3,7 @@
  *
  * 职责：git 执行层（数组化参数，绝不拼接 shell）、递归仓库发现、仓库发现结果
  * 两级缓存（内存 + $DSH_HOME/git-panel/scan-cache.json，命中即回 + 后台静默重扫）、
- * 提交规则读写（$DSH_HOME/git-rules/）、审计日志（$DSH_HOME/git-logs/）、
+ * 提交规则读写（$DSH_HOME/git-panel/rules/）、审计日志（$DSH_HOME/git-panel/logs/）、
  * LLM 提交信息生成，以及面向 Client 的 package-private JSON RPC。
  *
  * 依赖的 Host 服务（全部 ctx.get 可选读取）：
@@ -352,7 +352,7 @@ export default function () {
 
       async function rulesDir() {
         const home = await dshHome()
-        if (home) return joinPath(home, 'git-rules')
+        if (home) return joinPath(home, 'git-panel', 'rules')
         const root = (sandboxPolicy && sandboxPolicy.workspaceRoot) || '.'
         return joinPath(root, '.git-panel', 'rules')
       }
@@ -404,7 +404,7 @@ export default function () {
           const parts = []
           for (const key of Object.keys(entry)) parts.push(key + '=' + JSON.stringify(String(entry[key])))
           const line = '[' + now + '] ' + parts.join(' ')
-          const path = joinPath(home, 'git-logs', 'git-' + day + '.log')
+          const path = joinPath(home, 'git-panel', 'logs', 'git-' + day + '.log')
           // 本地后端（dsh-fs-local）没有 appendText：走下方读改写；writeText 的原子
           // 落盘自带 mkdir(recursive)，缺失父目录会自动创建，无需显式建目录。
           if (typeof fs.appendText === 'function') {
@@ -791,13 +791,13 @@ export default function () {
       // 生成 token 预算：推理模型（reasoning）会先思考再输出正文，正文需要独立额度。
       // 8000 只是上限（正常 commit message 只花几百），并按模型声明的 maxTokens 自动收窄。
       const MAX_GEN_TOKENS = 8000
-      // 生成模型配置：$DSH_HOME/git-rules/generate-model.json
+      // 生成模型配置：$DSH_HOME/git-panel/generate-model.json
       //   {provider, model, reasoningEffort} | null（null = 跟随会话默认）
       // reasoningEffort 取值 off/high/max（adapter 合法值）或 null（跟随默认）；
       // 传非法值会被 adapter 拒绝，host 捕获后回退为不传（跟随默认），绝不报错。
       async function genModelConfigPath() {
         const home = await dshHome()
-        return home ? joinPath(home, 'git-rules', 'generate-model.json') : null
+        return home ? joinPath(home, 'git-panel', 'generate-model.json') : null
       }
       async function loadGenModelConfig() {
         const p = await genModelConfigPath()

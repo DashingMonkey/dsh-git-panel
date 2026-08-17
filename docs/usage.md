@@ -63,7 +63,7 @@
 
 ## 提交规则系统
 
-- 存储：`$DSH_HOME/git-rules/default.yaml`（全局）+ `{repo-name}.yaml`（仓库专属，
+- 存储：`$DSH_HOME/git-panel/rules/default.yaml`（全局）+ `{repo-name}.yaml`（仓库专属，
   覆盖全局）；首次扫描自动创建默认文件。`$DSH_HOME` 定位顺序：
   `settings.prepareDocument()` 返回路径推导 → `%USERPROFILE%\.dsh` 探测 → workspace
   根 `.git-panel/rules` 兜底。
@@ -103,7 +103,7 @@
 
 - **无审批门**：写操作（commit/pull/push/switch/stash/reset/clean/discard）由面板用户
   显式点击触发后直接执行（类似 VS Code），无额外放行条件、不弹确认窗。
-- 写操作与其结果（ok/fail）写入 `$DSH_HOME/git-logs/git-YYYY-MM-DD.log`
+- 写操作与其结果（ok/fail）写入 `$DSH_HOME/git-panel/logs/git-YYYY-MM-DD.log`
   （`[ISO时间] key=value` 格式；写入经 promise 链串行化防并发丢行；条目含 scan /
   diff / generate / rules-save / rules-reset / ok:git.* / fail:git.* 等）。
 - 高频只读轮询（status/log）**不写审计**，避免日志噪声淹没写操作记录；`$DSH_HOME`
