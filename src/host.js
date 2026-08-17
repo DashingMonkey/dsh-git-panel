@@ -194,6 +194,7 @@ export default function () {
           stagedN: '已暂存 {n} 个文件', unstagedN: '已取消暂存 {n} 个文件',
           committedN: '已提交 {n} 个文件', pushed: '推送成功',
           pulled: 'Pull 完成（fetch + merge）',
+          fetched: '已 fetch（当前分支无上游，跳过 merge）',
           switchedCreate: '已创建并切换到 {b}', switched: '已切换到 {b}',
           stashed: '已 stash', stashPopped: 'stash pop 完成',
           resetDone: 'reset --{m} HEAD~1 完成', cleaned: '已清理未跟踪文件'
@@ -235,6 +236,7 @@ export default function () {
           stagedN: 'Staged {n} file(s)', unstagedN: 'Unstaged {n} file(s)',
           committedN: 'Committed {n} file(s)', pushed: 'Push succeeded',
           pulled: 'Pull complete (fetch + merge)',
+          fetched: 'Fetched (no upstream for current branch, merge skipped)',
           switchedCreate: 'Created and switched to {b}', switched: 'Switched to {b}',
           stashed: 'Changes stashed', stashPopped: 'stash pop complete',
           resetDone: 'reset --{m} HEAD~1 complete', cleaned: 'Untracked files cleaned'
@@ -403,8 +405,10 @@ export default function () {
       async function writeTextAnywhere(path, content) {
         try { await fsWriteText(path, content); return true } catch (e) { /* fall through */ }
         try {
-          const script = "const fs=require('fs');const p=require('path');fs.mkdirSync(p.dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2]);"
-          const r = await spawnRaw([process.execPath, '-e', script, path, content], '.', { timeoutMs: 15000 })
+          // content 经 stdin 传入（脚本固定字面量）：Windows argv ~32K 上限会截断
+          // 大内容（审计日志/扫描缓存累计可超过），stdin 无长度限制
+          const script = "const fs=require('fs');const p=require('path');let d='';process.stdin.setEncoding('utf8');process.stdin.on('data',(c)=>{d+=c});process.stdin.on('end',()=>{fs.mkdirSync(p.dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],d);});"
+          const r = await spawnRaw([process.execPath, '-e', script, path], '.', { stdinData: content, timeoutMs: 15000 })
           return r.code === 0
         } catch (e) { return false }
       }
@@ -426,6 +430,7 @@ export default function () {
         return auditChain
       }
       let auditHomeWarned = false
+      let auditWriteWarned = false
       async function auditWrite(entry) {
         try {
           const home = await dshHome()
@@ -447,7 +452,11 @@ export default function () {
             try { await fs.appendText(target, line + '\n'); return } catch (e) { /* 回退读改写 */ }
           }
           const prev = (await fsReadText(path)) || ''
-          await writeTextAnywhere(path, prev + line + '\n')
+          if (!(await writeTextAnywhere(path, prev + line + '\n')) && !auditWriteWarned) {
+            // 写盘失败告警一次（不刷屏），后续静默跳过
+            auditWriteWarned = true
+            console.error('[git-panel] 审计日志写盘失败: ' + path)
+          }
         } catch (e) { console.error('[git-panel] audit 失败', e) }
       }
 
@@ -788,11 +797,13 @@ export default function () {
         }, () => { inflightRescans.delete(key) })
       }
 
-      // 全量扫描（force / 缓存未命中路径）：激活结果并刷新两级缓存
-      async function scanRepos(root) {
+      // 全量扫描（force / 缓存未命中路径）：激活结果并刷新两级缓存；
+      // 扫描期间用户切走（currentRootKey 已变）则只更新缓存、不动 live 表
+      //（与 backgroundRescan 同一竞态守卫口径，防止旧 root 的慢扫描覆盖新 root）
+      async function scanRepos(root, key) {
         const res = await discoverRepos(root)
         if (res.ok) {
-          activateRepos(res.repos)
+          if (currentRootKey === key) activateRepos(res.repos)
           updateScanCache(res.root, res.repos)
         }
         return res
@@ -1137,9 +1148,17 @@ export default function () {
       async function opUnstage(repo, files) {
         const status = await repoStatus(repo)
         if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
-        const stagedSet = new Set(status.staged.map((f) => f.path))
-        for (const f of files) if (!stagedSet.has(f)) return fail(fmt(tr('errNotStaged'), { f }))
-        const r = await gitRunFiles(repo.path, ['reset', '-q'], files, { maxBytes: 128 * 1024, timeoutMs: 60000 })
+        const stagedInfo = new Map(status.staged.map((f) => [f.path, f]))
+        for (const f of files) if (!stagedInfo.has(f)) return fail(fmt(tr('errNotStaged'), { f }))
+        // rename/copy 的旧路径（orig）必须一并 reset，否则旧路径的删除仍留在 index，
+        // 提交后会丢失该文件内容（与 opCommit 同一口径）
+        const targets = []
+        for (const f of files) {
+          if (targets.indexOf(f) < 0) targets.push(f)
+          const orig = stagedInfo.get(f).orig
+          if (orig && targets.indexOf(orig) < 0) targets.push(orig)
+        }
+        const r = await gitRunFiles(repo.path, ['reset', '-q'], targets, { maxBytes: 128 * 1024, timeoutMs: 60000 })
         if (r.code !== 0) return fail(fmt(tr('errUnstage'), { e: (r.errText || r.text).slice(0, 300) }))
         return ok({ summary: fmt(tr('unstagedN'), { n: files.length }) })
       }
@@ -1185,7 +1204,10 @@ export default function () {
         if (rf.code !== 0) return fail(fmt(tr('errFetch'), { e: (rf.errText || rf.text).slice(0, 300) }))
         const upR = await gitRun(repo.path, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { maxBytes: 4096, timeoutMs: 30000 })
         const target = upR.code === 0 && !/^fatal:/.test(upR.errText) ? (upR.text || '').trim() : null
-        const rm = await gitRun(repo.path, ['merge', '--no-edit'].concat(target ? [target] : []), { maxBytes: 256 * 1024, timeoutMs: 120000 })
+        // 无上游（本地新建分支 / detached HEAD）：只 fetch 即成功——空参 merge 必然
+        // 失败，会把已完成的 fetch 误报为整体 Pull 失败
+        if (target === null) return ok({ summary: tr('fetched'), detail: (rf.text || '').trim().slice(0, 300) })
+        const rm = await gitRun(repo.path, ['merge', '--no-edit', target], { maxBytes: 256 * 1024, timeoutMs: 120000 })
         if (rm.code !== 0) return fail(fmt(tr('errMerge'), { e: (rm.errText || rm.text).slice(0, 400) }))
         return ok({ summary: tr('pulled'), detail: (rm.text || '').trim().slice(0, 300) })
       }
@@ -1247,11 +1269,21 @@ export default function () {
         for (const f of files) if (!known.has(f)) return fail(fmt(tr('errNotChanged'), { f }))
         const run = (args) => gitRunFiles(repo.path, args, files, { maxBytes: 128 * 1024, timeoutMs: 60000 })
         if (group === 'staged') {
-          const r = await run(['restore', '--staged', '--worktree'])
+          // rename/copy 的旧路径（orig）必须一并恢复（与 opCommit 同一口径），
+          // 否则新路径被删而旧路径的删除仍 staged，提交后两端内容同时丢失
+          const stagedInfo = new Map(status.staged.map((f) => [f.path, f]))
+          const targets = []
+          for (const f of files) {
+            if (targets.indexOf(f) < 0) targets.push(f)
+            const orig = stagedInfo.get(f).orig
+            if (orig && targets.indexOf(orig) < 0) targets.push(orig)
+          }
+          const runT = (args) => gitRunFiles(repo.path, args, targets, { maxBytes: 128 * 1024, timeoutMs: 60000 })
+          const r = await runT(['restore', '--staged', '--worktree'])
           if (r.code === 0) return ok({ summary: fmt(tr('discardedN'), { n: files.length }) })
           // 仓库尚无提交（无 HEAD）时 restore --staged 无法解析 HEAD：
           // 回退 git rm -f（从 index 移除并删除工作区文件）
-          const r2 = await run(['rm', '-f'])
+          const r2 = await runT(['rm', '-f'])
           if (r2.code !== 0) return fail(fmt(tr('errDiscard'), { e: (r2.errText || r2.text).slice(0, 300) }))
           return ok({ summary: fmt(tr('discardedN'), { n: files.length }) })
         }
@@ -1376,7 +1408,7 @@ export default function () {
         // 发起扫描前同步置激活标志（与缓存命中路径一致），scanRepos 完成时据此
         // 守卫激活——期间用户切走则只更新缓存、不动 live 表
         currentRootKey = key
-        const res = await scanRepos(root)
+        const res = await scanRepos(root, key)
         await ensureDefaultRules()
         return res
       })
@@ -1535,7 +1567,16 @@ export default function () {
         const effective = await loadEffectiveRules(repo)
         const yaml = emitRulesYaml({ system_prompt: effective.system_prompt, user_context: effective.user_context })
         try {
-          await spawnRaw(['cmd.exe', '/d', '/s', '/c', 'clip'], '.', { stdinData: yaml, timeoutMs: 15000 })
+          // 平台分支（与 openInExplorer 同法）：Windows clip / macOS pbcopy / Linux xclip→xsel
+          if (process.platform === 'win32') {
+            await spawnRaw(['cmd.exe', '/d', '/s', '/c', 'clip'], '.', { stdinData: yaml, timeoutMs: 15000 })
+          } else if (process.platform === 'darwin') {
+            await spawnRaw(['pbcopy'], '.', { stdinData: yaml, timeoutMs: 15000 })
+          } else {
+            let copied = false
+            try { copied = (await spawnRaw(['xclip', '-selection', 'clipboard'], '.', { stdinData: yaml, timeoutMs: 15000 })).code === 0 } catch (e) { /* xclip 不在 PATH，试 xsel */ }
+            if (!copied) await spawnRaw(['xsel', '--clipboard', '--input'], '.', { stdinData: yaml, timeoutMs: 15000 })
+          }
           return ok({ summary: tr('copied') })
         } catch (e) { return fail(fmt(tr('errCopy'), { e: e && e.message ? e.message : String(e) })) }
       })

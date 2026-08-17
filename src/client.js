@@ -407,7 +407,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         return 520
       }
       function savePanelW(w) {
-        try { window.localStorage.setItem('gp-panel-w', String(w)) } catch (e) { /* ignore */ }
+        // 钳制到 loadPanelW 的接受区间 [380, 2400]，否则宽屏拖出的宽度重载后会被读取端丢弃
+        try { window.localStorage.setItem('gp-panel-w', String(Math.min(2400, Math.max(380, w)))) } catch (e) { /* ignore */ }
       }
       function loadDiffW() {
         try {
@@ -417,7 +418,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         return 0
       }
       function saveDiffW(w) {
-        try { window.localStorage.setItem('gp-diff-w', String(w)) } catch (e) { /* ignore */ }
+        // 同 savePanelW：钳制到 loadDiffW 接受的区间
+        try { window.localStorage.setItem('gp-diff-w', String(Math.min(2400, Math.max(380, w)))) } catch (e) { /* ignore */ }
       }
       function loadCollapsed() {
         try { return window.localStorage.getItem('gp-collapsed') === '1' } catch (e) { return false }
@@ -457,7 +459,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           toggleWrap: '切换自动换行', closeDiff: '关闭 diff（Esc）',
           historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
           stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', generated: '已生成提交信息（规则来源：{s}）',
-          ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}',
+          ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}', genTimeout: '生成超时，请重试',
           commitFailed: '提交失败: {e}', editRules: '编辑提交规则',
           copyRules: '复制当前生效规则到剪贴板',
           effectiveRules: '当前生效：{s}', loading: '读取中…', msgPlaceholder: '提交信息（仅提交已暂存的文件；Ctrl+Enter 提交）',
@@ -482,6 +484,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           newBranch: '新建分支…', moreActions: '更多操作', push: '推送（push）', stashChanges: 'Stash 当前变更',
           stashPop: 'Stash pop（最近一条）', behindAhead: '落后 {b} / 领先 {a}', doneSuffix: '{label}完成', failedSuffix: '{label}失败',
           morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Stash pop（最近一条）',
+          moreResetSoft: 'Reset（撤销上次提交，保留更改）', moreResetHard: 'Reset Hard（撤销上次提交并丢弃更改）', moreClean: 'Clean（删除未跟踪文件）',
+          resetSoftTitle: 'Soft Reset（HEAD~1）', resetHardTitle: 'Hard Reset（HEAD~1）', cleanTitle: 'Clean 未跟踪文件', dangerRun: '执行',
+          resetSoftNote: '将撤销最近一次提交，其更改退回暂存区。此操作改写本地历史。',
+          resetHardNote: '将撤销最近一次提交并丢弃其全部更改。此操作不可恢复。',
+          cleanNote: '将删除所有未跟踪的文件与目录（git clean -fd）。此操作不可恢复。',
           loadingMore: '加载更多…', emptyHistory: '暂无提交记录',
           failedWith: '{label}失败: {e}',
           rescan: '重新扫描（并刷新所有仓库状态）', openFolder: '在文件资源管理器中打开工作空间', openFolderFailed: '打开文件夹失败: {e}', openFolderUnavailable: '文件管理器服务不可用',
@@ -505,7 +512,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           toggleWrap: 'Toggle word wrap', closeDiff: 'Close diff (Esc)',
           historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
           stageFirst: 'Stage files first using the + on the right of each file', generated: 'Commit message generated (rules: {s})',
-          ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}',
+          ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}', genTimeout: 'Generation timed out, please retry',
           commitFailed: 'Commit failed: {e}', editRules: 'Edit commit rules',
           copyRules: 'Copy effective rules to the clipboard',
           effectiveRules: 'Effective: {s}', loading: 'Loading…', msgPlaceholder: 'Commit message (commits only staged files; Ctrl+Enter to commit)',
@@ -530,6 +537,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           newBranch: 'New Branch…', moreActions: 'More Actions', push: 'Push', stashChanges: 'Stash Changes',
           stashPop: 'Stash Pop (latest)', behindAhead: 'Behind {b} / Ahead {a}', doneSuffix: '{label} completed', failedSuffix: '{label} failed',
           morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Pop Latest Stash',
+          moreResetSoft: 'Reset (undo last commit, keep changes)', moreResetHard: 'Reset Hard (undo last commit, discard changes)', moreClean: 'Clean (delete untracked files)',
+          resetSoftTitle: 'Soft Reset (HEAD~1)', resetHardTitle: 'Hard Reset (HEAD~1)', cleanTitle: 'Clean Untracked Files', dangerRun: 'Run',
+          resetSoftNote: 'Undoes the last commit; its changes return to the staging area. This rewrites local history.',
+          resetHardNote: 'Undoes the last commit and discards all of its changes. This action cannot be undone.',
+          cleanNote: 'Deletes all untracked files and directories (git clean -fd). This action cannot be undone.',
           loadingMore: 'Loading more…', emptyHistory: 'No commits yet',
           failedWith: '{label} failed: {e}',
           rescan: 'Rescan (also refreshes all repository statuses)', openFolder: 'Open workspace in file explorer', openFolderFailed: 'Failed to open folder: {e}', openFolderUnavailable: 'File manager service unavailable',
@@ -1225,6 +1237,10 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           }).catch(() => {})
         }, [])
         React.useEffect(() => { loadGenModel() }, [loadGenModel])
+        // 卸载中断标志：doGenerate 的轮询循环在组件卸载（面板关闭/重挂载）后必须停止，
+        // 否则旧循环在后台无限发 generatePoll 且与新循环叠加
+        const genAliveRef = React.useRef(true)
+        React.useEffect(() => () => { genAliveRef.current = false }, [])
         const canCommit = message.trim() !== '' && stagedPaths.length > 0 && busy === null
         const lineCount = Math.min(6, Math.max(2, (message.match(/\n/g) || []).length + 1))
 
@@ -1247,7 +1263,13 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
             if (!(r && r.ok)) { pushToast('error', (r && r.error) || tr('genFailedKeep')); return }
             const genId = r.genId
             let fails = 0
+            // 整体超时兜底：Host 端 LLM 挂起时 generatePoll 会永远返回未完成，
+            // 无超时则 busy 永久卡死（180s 覆盖慢模型的正常生成）
+            const deadline = Date.now() + 180000
             while (true) {
+              // 组件已卸载（面板关闭/重挂载）：停止轮询（finally 的 setBusy 为卸载后 no-op）
+              if (!genAliveRef.current) return
+              if (Date.now() > deadline) { pushToast('error', tr('genTimeout')); break }
               // 统一走 timer 服务（动态包沙箱禁用原生 setTimeout）
               await new Promise((res) => { timer.timeout(res, 120) })
               const p = await callRpc('generatePoll', { genId }).catch(() => null)
@@ -1399,6 +1421,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const anchorRef = React.useRef(null)
         // 放弃更改确认弹窗：null 或 { byGroup: {staged:[], unstaged:[], untracked:[]}, count }
         const [confirmDiscard, setConfirmDiscard] = React.useState(null)
+        // 危险操作确认弹窗（Reset / Clean）：null | 'reset-soft' | 'reset-hard' | 'clean'
+        const [confirmDanger, setConfirmDanger] = React.useState(null)
         const rowKey = (group, path) => group + '\u0000' + path
         const s = useStore()
 
@@ -1518,12 +1542,13 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         React.useEffect(() => {
           const onKey = (e) => {
             if (e.key !== 'Escape') return
+            if (confirmDanger) { setConfirmDanger(null); e.stopPropagation(); return }
             if (confirmDiscard) { setConfirmDiscard(null); e.stopPropagation(); return }
             if (selKeys.size > 0) { setSelKeys(new Set()); e.stopPropagation() }
           }
           window.addEventListener('keydown', onKey, true)
           return () => window.removeEventListener('keydown', onKey, true)
-        }, [confirmDiscard, selKeys])
+        }, [confirmDiscard, confirmDanger, selKeys])
 
         // 文件行点击：普通 = 单选并打开/关闭 diff（同一行再次点击 = 取消选中并关闭抽屉）；
         // Ctrl/⌘ = 增删多选；Shift = 锚点到当前行的范围多选。修饰键点击不切换 diff
@@ -1667,6 +1692,26 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               React.createElement('button', { className: 'gp-btn', onClick: () => setConfirmDiscard(null) }, tr('cancel')),
               React.createElement('button', { className: 'gp-btn gp-btn-danger', onClick: doDiscardConfirmed }, tr('discardOk'))))) : null
 
+        // 危险操作确认弹窗（Reset / Clean）：结构同放弃更改弹窗，Esc 由上方分层处理关闭
+        const DANGER_INFO = {
+          'reset-soft': { title: tr('resetSoftTitle'), note: tr('resetSoftNote') },
+          'reset-hard': { title: tr('resetHardTitle'), note: tr('resetHardNote') },
+          'clean': { title: tr('cleanTitle'), note: tr('cleanNote') }
+        }
+        const dangerModal = confirmDanger ? React.createElement('div', { className: 'gp-modal-backdrop', onClick: (e) => { e.stopPropagation(); setConfirmDanger(null) } },
+          React.createElement('div', { className: 'gp-modal gp-modal-sm', onClick: (e) => e.stopPropagation() },
+            React.createElement('div', { className: 'gp-modal-head' }, icon('warning', 15), DANGER_INFO[confirmDanger].title),
+            React.createElement('div', { className: 'gp-modal-body' },
+              React.createElement('div', { className: 'gp-confirm-note gp-danger' }, DANGER_INFO[confirmDanger].note)),
+            React.createElement('div', { className: 'gp-modal-foot' },
+              React.createElement('button', { className: 'gp-btn', onClick: () => setConfirmDanger(null) }, tr('cancel')),
+              React.createElement('button', { className: 'gp-btn gp-btn-danger', disabled: !!busy, onClick: () => {
+                const op = confirmDanger
+                setConfirmDanger(null)
+                if (op === 'clean') runWrite('clean', () => callRpc('clean', { repoId: repo.id, sessionId }))
+                else runWrite('reset', () => callRpc('reset', { repoId: repo.id, mode: op === 'reset-hard' ? 'hard' : 'soft', sessionId }))
+              } }, tr('dangerRun'))))) : null
+
         const head = React.createElement('div', { className: 'gp-repo-head', onClick: () => setCollapsed((c) => !c) },
           React.createElement('button', { className: 'gp-btn-icon', onClick: (e) => { e.stopPropagation(); setCollapsed((c) => !c) } }, icon(isCollapsed ? 'chevronRight' : 'chevronDown')),
           React.createElement('span', { className: 'gp-repo-name', title: repo.path }, repo.name),
@@ -1700,7 +1745,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               React.createElement('button', { className: 'gp-menu-item', onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); runWrite('pull', () => callRpc('pull', { repoId: repo.id, sessionId })) } }, tr('morePull')),
               React.createElement('button', { className: 'gp-menu-item', onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); runWrite('push', () => callRpc('push', { repoId: repo.id, sessionId })) } }, tr('morePush')),
               React.createElement('button', { className: 'gp-menu-item', onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); runWrite('stash', () => callRpc('stashPush', { repoId: repo.id, message: 'stash @ ' + new Date().toLocaleString(), sessionId })) } }, tr('moreStash')),
-              React.createElement('button', { className: 'gp-menu-item', onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); runWrite('stash-pop', () => callRpc('stashPop', { repoId: repo.id, ref: null, sessionId })) } }, tr('moreStashPop'))
+              React.createElement('button', { className: 'gp-menu-item', onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); runWrite('stash-pop', () => callRpc('stashPop', { repoId: repo.id, ref: null, sessionId })) } }, tr('moreStashPop')),
+              React.createElement('div', { className: 'gp-menu-sep' }),
+              // 危险操作：弹确认窗（与放弃更改同款），确认后执行
+              React.createElement('button', { className: 'gp-menu-item', disabled: !!busy, onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); setConfirmDanger('reset-soft') } }, tr('moreResetSoft')),
+              React.createElement('button', { className: 'gp-menu-item', disabled: !!busy, onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); setConfirmDanger('reset-hard') } }, tr('moreResetHard')),
+              React.createElement('button', { className: 'gp-menu-item', disabled: !!busy, onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); setConfirmDanger('clean') } }, tr('moreClean'))
             ) : null),
           (branchMenu.open || moreMenu.open) ? React.createElement('div', { className: 'gp-menu-backdrop', onClick: (e) => { e.stopPropagation(); closeAllMenus() } }) : null)
 
@@ -1723,7 +1773,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         // 确认弹窗用 fixed 定位，放在卡片外层（Fragment），避免任何卡片内堆叠上下文干扰
         return React.createElement(React.Fragment, null,
           React.createElement('div', { className: 'gp-repo-card' }, head, body),
-          discardModal)
+          discardModal,
+          dangerModal)
       }
 
       function workspaceOfSession(st, sessionId) {

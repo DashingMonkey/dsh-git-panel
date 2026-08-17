@@ -17,7 +17,15 @@ import { join } from 'node:path'
 
 const PKG_NAME = '@dsh-local/git-panel'
 const PKG_DIR = join('node_modules', ...PKG_NAME.split('/'))
-const ENTRY_ID = 'git-panel'
+// 结构化匹配（与 install.mjs 的幂等检测同口径）：仅命中本插件写入的 id/name
+// 字段行，避免其它插件的注释/配置中恰好含 "git-panel" 字样时被误判/误删。
+// m 标志兼容整文件与单行两种 test 用法（单行时 ^$ 锚点行为不变）。
+const RE_ENTRY_ID = /^\s*-\s*id:\s*git-panel\s*$/m
+const RE_PKG_NAME = /^\s*name:\s*['"]?@dsh-local\/git-panel['"]?\s*$/m
+const stripComment = (s) => s.split('\n').filter((l) => {
+  const t = l.trim()
+  return t !== '' && !t.startsWith('#')
+}).join('\n')
 
 function profileDir() {
   if (process.env.DSH_PROFILE) return process.env.DSH_PROFILE
@@ -52,10 +60,12 @@ if (existsSync(dest)) {
 // 2) 从 cordis.patch.yml 移除 git-panel 的 insert 块
 if (existsSync(patch)) {
   const cur = readFileSync(patch, 'utf8')
-  if (cur.includes(PKG_NAME) || cur.includes(ENTRY_ID)) {
+  // 存在性检测用结构化行（去注释后整体匹配），与 install.mjs 的 registered 判定同口径
+  const clean = stripComment(cur)
+  if (RE_ENTRY_ID.test(clean) || RE_PKG_NAME.test(clean)) {
     const bak = patch + '.bak.' + Date.now()
     writeFileSync(bak, cur)
-    // 移除包含 ENTRY_ID/PKG_NAME 的整个 `- insert:` 块
+    // 移除本插件（id/name 字段行命中）的整个 `- insert:` 块
     const lines = cur.split('\n')
     const out = []
     let i = 0
@@ -72,16 +82,16 @@ if (existsSync(patch)) {
             j++
           } else break
         }
-        if (!block.some((l) => l.includes(ENTRY_ID) || l.includes(PKG_NAME))) out.push(...block)
+        if (!block.some((l) => RE_ENTRY_ID.test(l) || RE_PKG_NAME.test(l))) out.push(...block)
         i = j
       } else {
         out.push(lines[i])
         i++
       }
     }
-    // 连同标记注释一起移除（如 "# @dsh-local/git-panel - installed by ..."）
+    // 连同 install.mjs 写入的标记注释一起移除（精确前缀匹配，不动其它插件注释）
     let body = out
-      .filter((l) => !(l.trim().startsWith('#') && (l.includes(ENTRY_ID) || l.includes(PKG_NAME))))
+      .filter((l) => !l.trim().startsWith('# @dsh-local/git-panel'))
       .join('\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim()

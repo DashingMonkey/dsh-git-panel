@@ -44,7 +44,17 @@ git 仓库 / tarball / 手动安装及迁移到另一台机器，见[安装详�
 
 重启 dsh web 后，侧栏底部出现 Git Panel 按钮。面板自动跟随当前工作空间发现仓库；顶部提交区支持按生效规则生成 commit message（只填入不提交）。
 
-![面板截图](assets/screenshot.png)
+面板总览：
+
+![面板总览](assets/screenshot-overview.png)
+
+Diff 窗口：
+
+![Diff 窗口](assets/screenshot-diff.png)
+
+提交规则编辑器：
+
+![提交规则编辑器](assets/screenshot-rules.png)
 
 详细说明见[使用文档](docs/usage.md)；架构与源码结构见[架构文档](docs/architecture.md)。
 
