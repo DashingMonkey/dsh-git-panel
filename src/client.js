@@ -45,12 +45,14 @@
  *     保住最深层目录），文件名仅自身超长才封顶省略；悬停 title 显示完整路径；
  *   - 写操作（commit/pull/push/switch/stash/reset/clean）直接执行（无审批/确认，类似 VS Code）。
  *
- * 依赖的 Client 服务（ctx.get 可选读取）：slots / timer / workspaces(openPath/pickDirectory)
+ * 依赖的 Client 服务（ctx.get 可选读取）：slots / timer / workspaces(openPath)
  */
 export default function () {
   return {
     apply(ctx) {
       const slots = ctx.get('slots')
+      // workspaces 已声明进 bundle 的 exports.inject（见 scripts/build.mjs），cordis 会等
+      // 该服务激活后才执行本 apply，因此此处必非空；守卫仅兜底动态包形态/异常时序。
       const workspaces = ctx.get('workspaces')
       if (!slots) return
 
@@ -122,19 +124,20 @@ body[data-ds-dark-theme] { --gp-border-1: rgba(255, 255, 255, .15); --gp-border-
 .gp-resize-active::after, .gp-resize-active:hover::after { opacity: .6; }
 .gp-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--gp-border-1); background: var(--dsw-specific-sidebar-fill); flex: 0 0 auto; }
 .gp-title { font-weight: 600; font-size: 14px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
-/* 标题（logo + 文字）整体是可点按钮：点击折叠到侧栏。负 margin 抵消内边距，保持原排版不变 */
+/* 标题（logo + 文字）整体是可点按钮：点击折叠到侧栏。负 margin 抵消内边距，保持原排版不变。
+   悬停不做任何高亮/阴影（保持标题栏静态观感），仅保留 pointer 手型提示可点；也不挂 title 气泡。 */
 .gp-title-btn { border: none; background: transparent; color: inherit; font-family: inherit; padding: 2px 6px; margin: -2px -6px; border-radius: 5px; cursor: pointer; }
-.gp-title-btn:hover { background: var(--dsw-alias-bg-layer-2); }
 /* 折叠态：右侧 44px 竖条，整条可点击展开；只露 logo 图标 + 竖排文字；
    折叠/展开时与面板交叉滑入/滑出（translateX 纯位移，类 diff 抽屉动效） */
 .gp-rail { position: fixed; top: 0; right: 0; bottom: 0; width: 44px; box-sizing: border-box; background: var(--dsw-specific-sidebar-fill); border: none; border-left: 1px solid var(--gp-border-1); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 11px 0; cursor: pointer; z-index: 60; color: var(--dsw-alias-label-primary); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; box-shadow: -6px 0 16px rgba(0,0,0,.10); transition: transform .22s cubic-bezier(.2,.8,.2,1); }
 .gp-rail:hover { background: var(--dsw-alias-bg-layer-2); }
 .gp-rail-label { writing-mode: vertical-rl; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: var(--dsw-alias-label-secondary); user-select: none; }
 .gp-rail:hover .gp-rail-label { color: var(--dsw-alias-label-primary); }
-.gp-root { font-size: 12px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; direction: rtl; text-align: left; }
+/* 工作空间名：永远跟随当前工作空间，纯展示（无跟随/手动模式之分），完整路径在悬停 title。
+   flex:1 占满标题与操作按钮之间的自由空间并居中文字；两侧宽度接近，视觉上即相对标题栏居中 */
+.gp-ws-name { font-size: 12px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; text-align: center; }
 .gp-header-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .gp-chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--gp-border-2); color: var(--dsw-alias-label-secondary); white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.gp-follow-chip { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); max-width: 42%; }
 .gp-main { flex: 1; min-height: 0; display: flex; }
 .gp-body { flex: 1; min-width: 0; overflow-y: auto; padding: 6px 8px; }
 .gp-empty { padding: 24px 12px; text-align: center; color: var(--dsw-alias-label-secondary); font-size: 13px; }
@@ -481,12 +484,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Stash pop（最近一条）',
           loadingMore: '加载更多…', emptyHistory: '暂无提交记录',
           failedWith: '{label}失败: {e}',
-          followChip: '跟随: {s}', followTitle: '自动跟随当前工作空间（切换工作空间时自动重新扫描）', followResume: '跟随工作空间', followResumeTitle: '恢复跟随当前工作空间并重新扫描',
-          rescan: '重新扫描（并刷新所有仓库状态）', pickRoot: '选择其他根目录（手动模式，不再自动跟随）',
+          rescan: '重新扫描（并刷新所有仓库状态）', openFolder: '在文件资源管理器中打开工作空间', openFolderFailed: '打开文件夹失败: {e}', openFolderUnavailable: '文件管理器服务不可用',
           locating: '正在定位工作空间…', scanning: '正在扫描 Git 仓库…', scanFailed: '扫描失败',
-          noRepos: '未发现 Git 仓库。可点击右上角文件夹图标选择其他目录。', resizeTitle: '拖拽调整面板宽度',
+          noWorkspace: '未打开工作空间', noRepos: '当前工作空间内未发现 Git 仓库。', resizeTitle: '拖拽调整面板宽度',
           toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel（类 VS Code Source Control）',
-          collapseTitle: '折叠到侧栏（只保留图标）', expandTitle: '展开 Git Panel'
+          expandTitle: '展开 Git Panel'
         },
         en: {
           groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', history: 'History',
@@ -530,12 +532,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Pop Latest Stash',
           loadingMore: 'Loading more…', emptyHistory: 'No commits yet',
           failedWith: '{label} failed: {e}',
-          followChip: 'Follow: {s}', followTitle: 'Auto-follow the current workspace (rescans when the workspace changes)', followResume: 'Follow workspace', followResumeTitle: 'Resume following the workspace and rescan',
-          rescan: 'Rescan (also refreshes all repository statuses)', pickRoot: 'Pick another root (manual mode, stops following)',
+          rescan: 'Rescan (also refreshes all repository statuses)', openFolder: 'Open workspace in file explorer', openFolderFailed: 'Failed to open folder: {e}', openFolderUnavailable: 'File manager service unavailable',
           locating: 'Locating workspace…', scanning: 'Scanning for Git repositories…', scanFailed: 'Scan failed',
-          noRepos: 'No Git repositories found. Click the folder icon to pick another directory.', resizeTitle: 'Drag to resize the panel width',
+          noWorkspace: 'No workspace open', noRepos: 'No Git repositories found in the current workspace.', resizeTitle: 'Drag to resize the panel width',
           toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel (VS Code Source Control style)',
-          collapseTitle: 'Collapse to side rail (icon only)', expandTitle: 'Expand Git Panel'
+          expandTitle: 'Expand Git Panel'
         }
       }
       function tr(key) {
@@ -1751,7 +1752,6 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const finishCloseDiff = React.useCallback(() => {
           setDiffSel((prev) => (prev && prev.closing ? null : prev))
         }, [])
-        const [follow, setFollow] = React.useState(true)
         const [resizing, setResizing] = React.useState(false)
         // 折叠/展开滑动动效（复用 DiffDrawer 的相位模式，与 diff 抽屉同 240ms/曲线）：
         // 点击折叠不立即切换渲染形态，先进过渡相 —— 离场元素 translateX(100%) 右滑出屏、
@@ -1759,7 +1759,6 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         // （store + localStorage）并卸载离场元素。过渡相内忽略重复点击。
         const [collAnim, setCollAnim] = React.useState(null) // null | { dir: 'collapse' | 'expand', entered: bool }
         const collRafRef = React.useRef(0)
-        const initialDoneRef = React.useRef(false)
         const resizeRef = React.useRef(false)
         // 扫描请求序列号：丢弃过期响应，防止「初始无 root 的慢扫描」晚到覆盖
         // 「跟随 workspace 的快扫描」的成功结果（竞态会让面板显示错误的空列表）
@@ -1787,12 +1786,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           }
         }, [])
 
+        // 永远跟随当前工作空间：wsPath 变化即重扫（scanSeqRef 防慢扫描晚到竞态）；
+        // 无工作空间时不发起扫描，主体渲染「未打开工作空间」空态
         React.useEffect(() => {
-          if (follow) {
-            if (wsPath && wsPath !== scan.root) doScan(wsPath)
-            else if (!wsPath && !initialDoneRef.current) { initialDoneRef.current = true; doScan(null) }
-          } else if (!initialDoneRef.current) { initialDoneRef.current = true; doScan(null) }
-        }, [follow, wsPath, scan.root, doScan])
+          if (wsPath && wsPath !== scan.root) doScan(wsPath)
+        }, [wsPath, scan.root, doScan])
 
         React.useEffect(() => {
           // 面板挂载时重新同步 DSH 语言：apply 阶段 locale 服务可能尚未就绪，
@@ -1893,17 +1891,32 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const diffRepo = diffSel ? scan.repos.find((r) => r.id === diffSel.repoId) : null
 
         const header = React.createElement('div', { className: 'gp-header' },
-          React.createElement('button', { className: 'gp-title gp-title-btn', title: tr('collapseTitle'), onClick: startCollapse }, icon('branch', 15), 'Git Panel'),
-          follow ? React.createElement('span', { className: 'gp-chip gp-follow-chip', title: tr('followTitle') }, fmt(tr('followChip'), { s: wsTitle || (wsPath ? wsPath.split(/[\\/]/).filter(Boolean).pop() : '—') })) : null,
-          !follow && wsPath ? React.createElement('button', { className: 'gp-btn', style: { fontSize: 11, padding: '2px 8px' }, title: tr('followResumeTitle'), onClick: () => { setFollow(true); doScan(wsPath) } }, tr('followResume')) : null,
-          scan.root ? React.createElement('span', { className: 'gp-root', title: scan.root }, scan.root) : null,
+          React.createElement('button', { className: 'gp-title gp-title-btn', onClick: startCollapse }, icon('branch', 15), 'Git Panel'),
+          wsPath ? React.createElement('span', { className: 'gp-ws-name', title: wsPath }, wsTitle || wsPath.split(/[\\/]/).filter(Boolean).pop()) : null,
           React.createElement('div', { className: 'gp-header-actions' },
-            React.createElement('button', { className: 'gp-btn-icon', title: tr('rescan'), onClick: () => doScan(follow ? (wsPath || scan.root) : scan.root, true) }, icon('refresh')),
-            React.createElement('button', { className: 'gp-btn-icon', title: tr('pickRoot'), onClick: async () => { if (workspaces && workspaces.pickDirectory) { const p = await workspaces.pickDirectory().catch(() => null); if (p) { setFollow(false); doScan(p) } } } }, icon('folder')),
+            React.createElement('button', { className: 'gp-btn-icon', title: tr('rescan'), onClick: () => doScan(wsPath || scan.root, true) }, icon('refresh')),
+            React.createElement('button', { className: 'gp-btn-icon', title: tr('openFolder'), disabled: !(wsPath || scan.root), onClick: () => {
+              const p = wsPath || scan.root
+              if (!p) return
+              const failToast = (e) => pushToast('error', fmt(tr('openFolderFailed'), { e: e && e.message ? e.message : String(e) }))
+              // 优先插件自己的 host RPC（explorer.exe 开新窗口，避开平台 Invoke-Item 激活
+              // 不可见旧窗口的问题）；host 半体未重启仍是旧版时回退平台 workspaces.openPath
+              callRpc('openInExplorer', { path: p }).then((r) => {
+                if (r && r.ok) return
+                if (r && typeof r.error === 'string' && r.error.indexOf('unknown method') === 0) {
+                  const ws = workspaces || ctx.get('workspaces')
+                  if (ws && typeof ws.openPath === 'function') { ws.openPath(p).catch(failToast); return }
+                  pushToast('error', tr('openFolderUnavailable'))
+                  return
+                }
+                pushToast('error', (r && r.error) || tr('openFolderUnavailable'))
+              }).catch(failToast)
+            } }, icon('folder')),
             React.createElement('button', { className: 'gp-btn-icon', title: tr('close'), onClick: () => store.set((st) => ({ ...st, panelOpen: false })) }, icon('close'))))
 
         const body = React.createElement('div', { className: 'gp-body' },
-          scan.state === 'scanning' || scan.state === 'idle' ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), scan.state === 'idle' ? ' ' + tr('locating') : ' ' + tr('scanning')) :
+          !wsPath ? React.createElement('div', { className: 'gp-empty' }, tr('noWorkspace')) :
+            scan.state === 'scanning' || scan.state === 'idle' ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), scan.state === 'idle' ? ' ' + tr('locating') : ' ' + tr('scanning')) :
             scan.state === 'error' ? React.createElement('div', { className: 'gp-empty' }, scan.error) :
               scan.repos.length === 0 ? React.createElement('div', { className: 'gp-empty' }, tr('noRepos')) :
                 scan.repos.map((r) => React.createElement(RepoCard, {

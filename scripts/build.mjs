@@ -88,7 +88,10 @@ const clientBundle = `window.__ModuleLoader__.load({
 \t\tif (React && React.__esModule && React.default) React = React.default;
 \t\tvar __gitPanelPlugin = (function () ${body})();
 \t\texports.apply = __gitPanelPlugin.apply;
-\t\texports.inject = ["slots", "connection"];
+\t\t// inject 声明是 cordis 的等待清单：fiber 会等服务激活后才执行 apply。
+\t\t// workspaces 必须在此声明 —— package.json 里 dsh.client.inject 的包级边只是
+\t\t// 装载元数据（不排序 apply），apply 时序竞态会让 ctx.get('workspaces') 抓到 undefined。
+\t\texports.inject = ["slots", "connection", "workspaces"];
 \t\treturn module.exports;
 \t}
 });

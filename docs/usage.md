@@ -2,11 +2,14 @@
 
 ## 仓库发现与面板布局
 
-- **自动跟随当前工作空间**：面板经 Slot 标准 props（`useSessions` / `useWorkspaces`）
+- **始终跟随当前工作空间**：面板经 Slot 标准 props（`useSessions` / `useWorkspaces`）
   推导「当前会话 → 所属工作空间 → 路径」（回退 `recentWorkspaceId`），切换工作空间/
-  会话时自动重新扫描；标题栏显示「跟随: \<工作空间名\>」。
-- 点击文件夹图标（`workspaces.pickDirectory`）手动选择扫描根后进入手动模式（不再自动
-  跟随），标题栏出现「跟随工作空间」按钮一键恢复；刷新图标始终重扫当前根。
+  会话时自动重新扫描；标题栏固定显示当前工作空间名（悬停可见完整路径）。
+- 点击文件夹图标在系统文件管理器中打开当前工作空间目录：走插件自己的
+  `openInExplorer` RPC（host 半体起 `explorer.exe` 显式开新窗口，避开平台
+  `host.openPath`/Invoke-Item 对已打开目录只激活既有窗口、旧窗口不可见时
+  用户无感知的问题）；host 半体未升级时自动回退平台 `workspaces.openPath`。
+  刷新图标始终重扫当前工作空间。未打开工作空间时主体显示空态、不发起扫描。
 - 扫描根默认跟随当前工作空间路径（面板主动携带 root 调用，Host 不再回退
   `sandboxPolicy.workspaceRoot`——在 dsh web 部署里那可能是无意义的进程启动目录）；
   BFS 递归发现嵌套 Git 仓库（含 worktree 的 `.git` 文件形态）；跳过 `node_modules`/

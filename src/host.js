@@ -1308,6 +1308,29 @@ export default function () {
         return { ok: true, locale: currentLocale }
       })
 
+      // 打开工作空间目录。不走平台 host.openPath（powershell Invoke-Item）：它对已打开的
+      // 目录只激活既有窗口——旧窗口落在其他虚拟桌面/不可见状态时用户毫无感知，且后台进程
+      // 经 ShellExecute 起的窗口没有前台权限。explorer.exe 显式开新窗口：新窗口总落在当前
+      // 活动虚拟桌面，且由常驻交互态 shell 进程创建，能正常置前。
+      registerRpc('openInExplorer', async (args) => {
+        const p = args && args.path
+        if (!p || typeof p !== 'string') return fail('path required')
+        await audit({ op: 'open-explorer', repo: p })
+        let target
+        try { target = await fs.resolve(p) } catch (e) { return fail(fmt(tr('errBadDir'), { p })) }
+        let info = null
+        try { info = await fs.stat(target) } catch (e) { /* ignore */ }
+        if (!info || info.type !== 'directory') return fail(fmt(tr('errNotDir'), { p }))
+        const cmd = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open'
+        // fs.resolve 的返回是服务对象而非字符串，进进程参数前必须经 fs.processPath 摊平
+        // （同 discoverRepos 的 rootNorm 处理），否则 child_process 报 options.cwd 类型错误
+        const procPath = fs.processPath(target) || p
+        // explorer.exe 委托给常驻 shell 后即刻退出，退出码语义不可靠（委托成功也可能非零），
+        // 只把 spawn 级失败当作错误，不以退出码判定成败
+        try { await spawnRaw([cmd, procPath], procPath, { timeoutMs: 15000 }) } catch (e) { return fail(e && e.message ? e.message : String(e)) }
+        return ok()
+      })
+
       registerRpc('scan', async (args) => {
         args = args || {}
         const root = args.root
