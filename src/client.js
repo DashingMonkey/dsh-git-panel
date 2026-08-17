@@ -9,14 +9,20 @@
  *   - 变更分组（暂存的更改 / 更改 / 未跟踪的更改）最左侧带展开/收起 chevron，
  *     最右侧「放弃全部 / 放弃单个」+「暂存/取消暂存」按钮，按钮右侧显示组内数量；
  *     放弃更改（Discard，VS Code codicon 官方「U 形回旋曲箭头」填充图标，与刷新圆箭头明显区分）
- *     为不可逆操作，直接执行（仅留审计）；行内操作按钮（放弃/暂存/取消暂存）悬停时
- *     图标不变色，周围垫一块更深的方形底色（VS Code 工具栏 hover 风格）；
+ *     为不可逆操作：单文件 / 整组 / 多选批量统一先弹确认框（含文件数与预览），确认后执行（留审计）；
+ *     行内操作按钮（放弃/暂存/取消暂存）悬停时图标不变色，周围垫一块更深的方形底色（VS Code 工具栏 hover 风格）；
  *   - 提交区位于仓库卡片顶部（message 输入框在上，变更列表在下）；
  *   - 历史区加大：行高 26 / 字号 13 / 高度 470，节点更大更清晰；
  *     图谱按 lane 循环配色、合并线为圆角肘形曲线，提交详情改为行悬停浮层（VS Code hover 风格）；
  *   - 点击文件从面板左缘滑出浮层 diff 抽屉（覆盖在聊天区上方，文件列表保持可见可
  *     直接切换文件）：双列行号、整行柔和红绿底色、sticky 分段头、+增/−删 统计徽标、
  *     自动换行开关；抽屉左缘可拖拽调宽（记忆在 localStorage），Esc / 点遮罩关闭；
+ *     开/关抽屉均为滑入/滑出动效（transition + 双 rAF 入场，避免首帧闪现完整面板）；
+ *     被点击的文件行保持 VS Code 式选中盒（1px 品牌色边框 + 浅品牌底），再次点击同一行 = 取消选中并关闭抽屉；
+ *   - 文件行支持 VS Code 式多选：Ctrl/⌘+点击增删、Shift+点击按可见顺序范围选择（按仓库隔离，
+ *     修饰键点击不切换 diff），选中行同样带选中盒；多选后点击任一选中行的 放弃/暂存/取消暂存
+ *     按钮即作用于全部选中文件（放弃仍弹确认），点击未选中行的按钮仅作用于该行；
+ *     操作成功或文件移组后自动剪掉失效的选中项；
  *   - 面板左缘可拖拽调整整体宽度，宽度记忆在 localStorage。
  *
  * 组件映射（原 TSX 设计 → 本实现）：
@@ -33,7 +39,8 @@
  *
  * 交互约定：
  *   - 下拉菜单（分支/更多/规则）带全局透明遮罩，点击任何外部区域自动关闭；
- *   - 文件行只显示文件名，悬停 title 显示完整路径；
+ *   - 文件行/diff 抽屉头部显示「文件名 + 目录」，空间不足时目录先收缩（省略号在左侧、
+ *     保住最深层目录），文件名仅自身超长才封顶省略；悬停 title 显示完整路径；
  *   - 写操作（commit/pull/push/switch/stash/reset/clean）直接执行（无审批/确认，类似 VS Code）。
  *
  * 依赖的 Client 服务（ctx.get 可选读取）：slots / timer / workspaces(openPath/pickDirectory)
@@ -92,13 +99,28 @@ export default function () {
 
       injectCss(`
 .gp-panel, .gp-panel * { box-sizing: border-box; }
-.gp-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 96vw; background: var(--dsw-alias-bg-layer-1); border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; pointer-events: auto; z-index: 60; font-size: 14px; color: var(--dsw-alias-label-primary); box-shadow: -12px 0 32px rgba(0,0,0,.18); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+/* UI 控件禁用文本选择（双击/拖动扩选在列表行上很丑，对齐 VS Code 列表行为）：
+   面板 / diff 抽屉 / 弹窗 / 通知整体 none；例外恢复 text —— diff 代码区（复制代码）、
+   提交详情浮层（复制 hash/message）、输入框（编辑文本）。完整路径悬停 title 仍可见。 */
+.gp-panel, .gp-diff-drawer, .gp-modal, .gp-toast { user-select: none; }
+.gp-diff-body, .gp-cd-pop, .gp-panel input, .gp-panel textarea, .gp-modal input, .gp-modal textarea { user-select: text; }
+.gp-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 96vw; background: var(--dsw-alias-bg-layer-1); border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; pointer-events: auto; z-index: 60; font-size: 14px; color: var(--dsw-alias-label-primary); box-shadow: -12px 0 32px rgba(0,0,0,.18); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; transition: width .18s ease; }
+/* 拖拽调宽期间关掉 width 过渡，避免跟手延迟；折叠/展开时才播放动效 */
+.gp-noanim { transition: none !important; }
 .gp-resize { position: absolute; top: 0; left: -2px; bottom: 0; width: 5px; cursor: ew-resize; z-index: 80; }
 .gp-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; transform: translateX(-50%); background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .15s; }
 .gp-resize:hover::after { opacity: .35; }
 .gp-resize-active::after, .gp-resize-active:hover::after { opacity: .6; }
 .gp-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-specific-sidebar-fill); flex: 0 0 auto; }
 .gp-title { font-weight: 600; font-size: 14px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+/* 标题（logo + 文字）整体是可点按钮：点击折叠到侧栏。负 margin 抵消内边距，保持原排版不变 */
+.gp-title-btn { border: none; background: transparent; color: inherit; font-family: inherit; padding: 2px 6px; margin: -2px -6px; border-radius: 5px; cursor: pointer; }
+.gp-title-btn:hover { background: var(--dsw-alias-bg-layer-2); }
+/* 折叠态：右侧 44px 竖条，整条可点击展开；只露 logo 图标 + 竖排文字 */
+.gp-rail { position: fixed; top: 0; right: 0; bottom: 0; width: 44px; box-sizing: border-box; background: var(--dsw-specific-sidebar-fill); border: none; border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 11px 0; cursor: pointer; z-index: 60; color: var(--dsw-alias-label-primary); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; box-shadow: -6px 0 16px rgba(0,0,0,.10); }
+.gp-rail:hover { background: var(--dsw-alias-bg-layer-2); }
+.gp-rail-label { writing-mode: vertical-rl; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: var(--dsw-alias-label-secondary); user-select: none; }
+.gp-rail:hover .gp-rail-label { color: var(--dsw-alias-label-primary); }
 .gp-root { font-size: 12px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; direction: rtl; text-align: left; }
 .gp-header-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .gp-chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-secondary); white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -168,10 +190,22 @@ body[data-ds-dark-theme] .gp-file-row:hover { box-shadow: 0 1px 4px rgba(0,0,0,.
 .gp-file-badge.gp-g-added { color: var(--dsw-alias-state-success-primary); }
 .gp-file-badge.gp-g-modified { color: var(--dsw-alias-state-warn-primary); }
 .gp-file-badge.gp-g-deleted { color: var(--dsw-alias-state-error-primary); }
-.gp-file-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; color: #333333; }
+/* 与抽屉头部同策略：文件名不先收缩（超长才被 max-width 封顶），目录独自让路；
+   direction:rtl 让目录省略号落左侧，保留最深层目录（…lib/components）。 */
+.gp-file-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; max-width: 58%; color: #333333; }
 body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
-.gp-file-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.gp-file-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; direction: rtl; text-align: left; }
 .gp-file-orig { font-size: 12px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ===== 多选（Ctrl/Shift）与激活（diff 打开）行高亮：VS Code 式选中盒 =====
+   1px 品牌色边框（box-shadow inset 实现，不占布局）+ 浅品牌底色，视觉明确且悬停不闪；
+   置于 .gp-file-row:hover 规则之后：等特异性下后者胜出。 */
+.gp-file-row.gp-file-sel, .gp-file-row.gp-file-active { background: var(--dsw-alias-interactive-bg-hover); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
+/* 危险操作按钮（放弃更改确认） */
+.gp-btn-danger { background: var(--dsw-alias-state-error-primary); border-color: var(--dsw-alias-state-error-primary); color: #ffffff; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.gp-btn-danger:hover:not(:disabled) { filter: brightness(1.12); }
+/* 放弃更改确认弹窗：不可恢复提示 + 文件预览列表 */
+.gp-confirm-note { margin-top: 8px; font-size: 12.5px; }
+.gp-confirm-files { margin-top: 8px; max-height: 150px; overflow-y: auto; border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; padding: 6px 9px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-all; }
 .gp-commit-area { padding: 9px 10px 10px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
 .gp-textarea { width: 100%; resize: none; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); padding: 7px 9px; font-size: 13px; line-height: 1.5; font-family: inherit; min-height: 58px; max-height: 138px; }
 .gp-textarea:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
@@ -203,10 +237,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-cd-message { white-space: pre-wrap; word-break: break-word; margin-bottom: 8px; }
 .gp-cd-stat { white-space: pre-wrap; font-family: monospace; font-size: 12px; color: var(--dsw-alias-label-secondary); }
 /* ===== Diff 查看器：从面板左缘滑出的浮层抽屉（z 层级低于面板菜单/模态/通知） ===== */
-.gp-diff-backdrop { position: fixed; top: 0; bottom: 0; left: 0; background: rgba(0,0,0,.22); z-index: 54; pointer-events: auto; animation: gp-fade-in .16s ease-out; }
-@keyframes gp-fade-in { from { opacity: 0; } to { opacity: 1; } }
-.gp-diff-drawer { position: fixed; top: 0; bottom: 0; background: var(--dsw-alias-bg-layer-1); border-left: 1px solid var(--dsw-alias-border-l1); box-shadow: -14px 0 40px rgba(0,0,0,.28); display: flex; flex-direction: column; z-index: 56; pointer-events: auto; animation: gp-drawer-in .18s ease-out; font-size: 13px; color: var(--dsw-alias-label-primary); }
-@keyframes gp-drawer-in { from { transform: translateX(56px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.gp-diff-backdrop { position: fixed; top: 0; bottom: 0; left: 0; background: rgba(0,0,0,.22); z-index: 54; pointer-events: auto; transition: opacity .22s cubic-bezier(.2,.8,.2,1); }
+/* 面板不带头影：深度感由整块遮罩提供（遮罩延伸到面板下方，面板滑入盖住它）。
+   入场/关闭均为纯位移：translateX(100%) 时面板整体藏在不透明的 Git Panel（z-60）
+   正后方，无边影/透明度爬升，任何像素都不会在滑动开始前显形。 */
+.gp-diff-drawer { position: fixed; top: 0; bottom: 0; background: var(--dsw-alias-bg-layer-1); border-left: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; z-index: 56; pointer-events: auto; transition: transform .22s cubic-bezier(.2,.8,.2,1); font-size: 13px; color: var(--dsw-alias-label-primary); }
 .gp-diff-resize { position: absolute; top: 0; left: -2px; bottom: 0; width: 6px; cursor: ew-resize; z-index: 5; }
 .gp-diff-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; transform: translateX(-50%); background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .15s; }
 .gp-diff-resize:hover::after { opacity: .35; }
@@ -217,8 +252,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-diff-glyph.gp-g-modified { color: var(--dsw-alias-state-warn-primary); background: rgba(215,166,72,.16); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); }
 .gp-diff-glyph.gp-g-deleted { color: var(--dsw-alias-state-error-primary); background: rgba(248,81,73,.14); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent); }
 .gp-diff-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 0 1 auto; }
-.gp-diff-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gp-diff-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+/* 收缩优先级：文件名 flex:0 0 auto 永不先让路（仅超长时被 max-width 封顶省略），
+   路径 flex:1 1 auto + min-width:0 独自承担挤压；配合 direction:rtl 省略号落在左侧，
+   保住最靠近文件名的深层目录（…ooks/panel）。悬停 title 看完整路径。 */
+.gp-diff-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; max-width: 60%; }
+.gp-diff-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; flex: 1 1 auto; min-width: 0; }
 .gp-diff-stats { display: inline-flex; gap: 8px; flex: 0 0 auto; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
 .gp-diff-stat-add { color: var(--dsw-alias-state-success-primary); font-weight: 700; }
 .gp-diff-stat-del { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
@@ -365,6 +403,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
       function saveDiffW(w) {
         try { window.localStorage.setItem('gp-diff-w', String(w)) } catch (e) { /* ignore */ }
       }
+      function loadCollapsed() {
+        try { return window.localStorage.getItem('gp-collapsed') === '1' } catch (e) { return false }
+      }
+      function saveCollapsed(v) {
+        try { window.localStorage.setItem('gp-collapsed', v ? '1' : '0') } catch (e) { /* ignore */ }
+      }
 
       function createStore(initial) {
         let state = initial
@@ -375,7 +419,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           subscribe: (l) => { listeners.add(l); return () => listeners.delete(l) }
         }
       }
-      const store = createStore({ panelOpen: false, toasts: [], refreshTick: 0, lastOp: null, lastOpRepoId: null, panelW: loadPanelW() })
+      const store = createStore({ panelOpen: false, toasts: [], refreshTick: 0, lastOp: null, lastOpRepoId: null, panelW: loadPanelW(), collapsed: loadCollapsed() })
 
       // ============ 国际化：跟随 DSH 语言设置（locale.preference）自动切换 中文 / English ============
       const localeSvc = ctx.get('locale')
@@ -412,6 +456,9 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           loadingStatus: '读取状态…', statusLoadFailed: '读取状态失败', gitStatusFailed: 'git status 失败：{e}', treeClean: '工作区干净，没有变更',
           unstageAll: '取消暂存全部', stageAll: '暂存全部（{n} 个文件）', unstage: '取消暂存', stage: '暂存（git add）',
           discardAll: '放弃所有更改', discardFile: '放弃更改', groupCount: '共 {n} 个文件',
+          discardTitle: '放弃更改', discardConfirmN: '确定要放弃对 {n} 个文件的更改吗？', discardConfirm1: '确定要放弃对该文件的更改吗？',
+          discardIrreversible: '此操作不可恢复。', discardUntrackedNote: '其中未跟踪的文件将被直接删除。',
+          discardMore: '…以及其他 {n} 个文件', discardOk: '放弃更改',
           stagedNTitle: '已暂存 {n} 个文件', unstagedNTitle: '未暂存变更 {n} 个文件', untrackedNTitle: '未跟踪 {n} 个文件',
           pullTitle: 'Pull（fetch + merge）', switchBranch: '切换分支',
           loadingBranches: '读取分支…', branchesLoadFailed: '读取分支失败', newBranchName: '新分支名', createAndSwitch: '创建并切换',
@@ -424,7 +471,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           rescan: '重新扫描（并刷新所有仓库状态）', pickRoot: '选择其他根目录（手动模式，不再自动跟随）',
           locating: '正在定位工作空间…', scanning: '正在扫描 Git 仓库…', scanFailed: '扫描失败',
           noRepos: '未发现 Git 仓库。可点击右上角文件夹图标选择其他目录。', resizeTitle: '拖拽调整面板宽度',
-          toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel（类 VS Code Source Control）'
+          toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel（类 VS Code Source Control）',
+          collapseTitle: '折叠到侧栏（只保留图标）', expandTitle: '展开 Git Panel'
         },
         en: {
           groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', history: 'History',
@@ -456,6 +504,9 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           loadingStatus: 'Loading status…', statusLoadFailed: 'Failed to load status', gitStatusFailed: 'git status failed: {e}', treeClean: 'Working tree clean',
           unstageAll: 'Unstage All', stageAll: 'Stage All ({n} files)', unstage: 'Unstage', stage: 'Stage (git add)',
           discardAll: 'Discard All Changes', discardFile: 'Discard Changes', groupCount: '{n} files in this group',
+          discardTitle: 'Discard Changes', discardConfirmN: 'Discard changes to {n} files?', discardConfirm1: 'Discard changes to this file?',
+          discardIrreversible: 'This action cannot be undone.', discardUntrackedNote: 'Untracked files among them will be deleted outright.',
+          discardMore: '…and {n} more', discardOk: 'Discard Changes',
           stagedNTitle: '{n} files staged', unstagedNTitle: '{n} unstaged changes', untrackedNTitle: '{n} untracked files',
           pullTitle: 'Pull (fetch + merge)', switchBranch: 'Switch Branch',
           loadingBranches: 'Loading branches…', branchesLoadFailed: 'Failed to load branches', newBranchName: 'New branch name', createAndSwitch: 'Create & Switch',
@@ -468,7 +519,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           rescan: 'Rescan (also refreshes all repository statuses)', pickRoot: 'Pick another root (manual mode, stops following)',
           locating: 'Locating workspace…', scanning: 'Scanning for Git repositories…', scanFailed: 'Scan failed',
           noRepos: 'No Git repositories found. Click the folder icon to pick another directory.', resizeTitle: 'Drag to resize the panel width',
-          toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel (VS Code Source Control style)'
+          toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel (VS Code Source Control style)',
+          collapseTitle: 'Collapse to side rail (icon only)', expandTitle: 'Expand Git Panel'
         }
       }
       function tr(key) {
@@ -707,14 +759,44 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
       // DiffDrawer：点击文件后从面板左缘向左滑出的浮层查看器。
       //   - 抽屉右缘与面板左缘齐平（覆盖在聊天区上方），文件列表保持可见，点别的文件直接切换；
       //   - 遮罩仅覆盖抽屉左侧区域（聊天区），点击遮罩或按 Esc 关闭；
+      //   - 开/关均为整屉滑入/滑出动效：遮罩是延伸到面板下方的一整块深色（面板滑入后
+      //     盖住它，即「阴影整体 + 面板遮挡」）；面板自身无投影、无透明度动画，纯位移，
+      //     初始停在 translateX(100%) —— 被不透明的 Git Panel 完全遮挡，双 rAF 确保
+      //     初始样式先绘制一帧再开始过渡（根治首帧以终态闪现的问题）；
+      //   - 关闭相位由父组件写入 sel.closing（所有关闭入口统一走它，含「再次点击文件行」），
+      //     本组件播完滑出动效（240ms）后回调 onClose 真正卸载；期间切到新文件会取消卸载；
       //   - 左缘拖拽调宽，宽度记忆在 localStorage（gp-diff-w）。
-      function DiffDrawer({ repo, sel, panelW, onClose }) {
+      function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose }) {
         const [state, setState] = React.useState({ loading: true, text: '', error: '' })
         const [wrap, setWrap] = React.useState(false)
         const [drawerW, setDrawerW] = React.useState(() => loadDiffW() || Math.min(760, Math.max(440, Math.round(window.innerWidth * 0.42))))
         const [resizing, setResizing] = React.useState(false)
+        // 滑入/滑出相位：off（未入场 / sel.closing）时整屉平移到面板正后方且全透明
+        const [entered, setEntered] = React.useState(false)
+        const closing = sel.closing === true
+        const closeTimerRef = React.useRef(null)
+        const rafRef = React.useRef(0)
         const resizeRef = React.useRef(false)
         const wRef = React.useRef(drawerW)
+
+        // 入场：双 rAF 让「面板后方 + 全透明」的初始样式先完成一次绘制，再切到终态触发 transition
+        React.useEffect(() => {
+          rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = requestAnimationFrame(() => setEntered(true))
+          })
+          return () => cancelAnimationFrame(rafRef.current)
+        }, [])
+
+        // 关闭相位：滑出动效播完（240ms）后回调 onClose 真正卸载；期间切到新文件
+        // （父组件整体替换 diffSel、closing 复位为 false）→ effect 清理自动取消卸载
+        React.useEffect(() => {
+          if (!closing) return
+          closeTimerRef.current = timer.timeout(() => onClose(), 240)
+          return () => { if (closeTimerRef.current) { closeTimerRef.current(); closeTimerRef.current = null } }
+        }, [closing, onClose])
+
+        // Esc / X / 遮罩：请求进入关闭相位（由父组件统一标记，防止与文件切换竞态）
+        const requestClose = () => { if (!closing && onRequestClose) onRequestClose() }
 
         React.useEffect(() => {
           let alive = true
@@ -728,10 +810,11 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         }, [repo.id, sel.path, sel.group])
 
         React.useEffect(() => {
-          const onKey = (e) => { if (e.key === 'Escape') onClose() }
+          const onKey = (e) => { if (e.key === 'Escape') requestClose() }
           window.addEventListener('keydown', onKey)
           return () => window.removeEventListener('keydown', onKey)
-        }, [onClose])
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [closing, onClose])
 
         // 抽屉左缘拖拽调宽：宽度 = 视口宽 − 面板宽 − 指针 x，松手时持久化
         React.useEffect(() => {
@@ -780,7 +863,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           React.createElement('span', { className: 'gp-spacer' }),
           React.createElement('span', { className: 'gp-chip' }, GROUP_META[sel.group] ? tr(GROUP_META[sel.group].titleKey) : sel.group),
           React.createElement('button', { className: 'gp-btn-icon' + (wrap ? ' gp-on' : ''), title: tr('toggleWrap'), onClick: () => setWrap((w) => !w) }, icon('wrap')),
-          React.createElement('button', { className: 'gp-btn-icon', title: tr('closeDiff'), onClick: onClose }, icon('close')))
+          React.createElement('button', { className: 'gp-btn-icon', title: tr('closeDiff'), onClick: requestClose }, icon('close')))
 
         const body = React.createElement('div', { className: 'gp-diff-body' },
           state.loading
@@ -793,9 +876,16 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
                     b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
                     b.rows.map(renderRow)))))
 
+        // 滑入/滑出相位：off = 未入场或正在关闭 → 整屉藏到不透明的 Git Panel 正后方。
+        // 遮罩是一整块（right: panelW，延伸到本面板下方，由面板滑入后盖住）；
+        // 面板只做纯位移（无投影、无透明度动画），起点被 Git Panel 完全遮挡。
+        const off = !entered || closing
         return React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'gp-diff-backdrop', style: { right: (panelW + wEff) + 'px' }, onClick: onClose }),
-          React.createElement('div', { className: 'gp-diff-drawer', style: { right: panelW + 'px', width: wEff + 'px' } },
+          React.createElement('div', { className: 'gp-diff-backdrop', style: { right: panelW + 'px', opacity: off ? 0 : 1 }, onClick: requestClose }),
+          React.createElement('div', {
+            className: 'gp-diff-drawer',
+            style: { right: panelW + 'px', width: wEff + 'px', transform: off ? 'translateX(100%)' : 'none' }
+          },
             React.createElement('div', {
               className: 'gp-diff-resize' + (resizing ? ' gp-diff-resize-active' : ''),
               title: tr('resizeTitle'),
@@ -1248,7 +1338,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: save, disabled: st.saving || st.loading }, st.saving ? tr('saving') : tr('save')))))
       }
 
-      function RepoCard({ repo, sessionId, onOpenDiff }) {
+      function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
         const [status, setStatus] = React.useState({ loading: true, data: null, error: '' })
         const [isCollapsed, setCollapsed] = React.useState(false)
         const [historyOpen, setHistoryOpen] = React.useState(false)
@@ -1256,6 +1346,13 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const [moreMenu, setMoreMenu] = React.useState({ open: false })
         const [busy, setBusy] = React.useState(null)
         const [message, setMessage] = React.useState('')
+        // 多选（Ctrl/Shift）：'group\u0000path' 的集合，按仓库隔离；普通点击 = 单选激活行
+        // （打开/关闭 diff）并清空多选。激活行（diffSel）由父组件持有，另行高亮。
+        const [selKeys, setSelKeys] = React.useState(() => new Set())
+        const anchorRef = React.useRef(null)
+        // 放弃更改确认弹窗：null 或 { byGroup: {staged:[], unstaged:[], untracked:[]}, count }
+        const [confirmDiscard, setConfirmDiscard] = React.useState(null)
+        const rowKey = (group, path) => group + '\u0000' + path
         const s = useStore()
 
         const loadStatus = React.useCallback(async () => {
@@ -1287,7 +1384,8 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const runWrite = async (label, call) => {
           if (busy) return
           setBusy(label)
-          try { handleWriteResult(await call(), label) } catch (e) { pushToast('error', fmt(tr('failedWith'), { label, e: e && e.message ? e.message : String(e) })) }
+          // 返回 'ok' / 'error'（busy 早退返回 undefined）：批量操作据成败决定是否清空多选
+          try { return handleWriteResult(await call(), label) } catch (e) { pushToast('error', fmt(tr('failedWith'), { label, e: e && e.message ? e.message : String(e) })) }
           finally { setBusy(null) }
         }
 
@@ -1323,6 +1421,127 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const totalUnstaged = data ? data.unstaged.length : 0
         const totalUntracked = data ? data.untracked.length : 0
 
+        // ===== 多选 / 激活行 / 放弃确认（均需 data，置于其后） =====
+        // 激活行 = diff 抽屉正展示的行（同一文件可同时出现在 staged/unstaged 两组，须带组判定）
+        const activeKey = diffSel && diffSel.repoId === repo.id ? rowKey(diffSel.group, diffSel.path) : null
+
+        // 可见的扁平顺序（staged → unstaged → untracked，收起的组跳过）：Shift 范围选择按它取区间
+        const flatKeys = React.useMemo(() => {
+          const out = []
+          if (data) {
+            for (const g of ['staged', 'unstaged', 'untracked']) {
+              if (groupsOpen[g] === false) continue
+              for (const f of data[g] || []) out.push(rowKey(g, f.path))
+            }
+          }
+          return out
+        }, [data, groupsOpen])
+
+        // status 刷新后剪掉已消失的多选项（暂存/放弃后文件移组），锚点失效则重置。
+        // 按「全部行」（含收起组）校验：收起组里的选中项仍是有效文件，不应被误剪。
+        const flatKeysAll = () => {
+          const out = []
+          if (data) for (const g of ['staged', 'unstaged', 'untracked']) for (const f of data[g] || []) out.push(rowKey(g, f.path))
+          return out
+        }
+        React.useEffect(() => {
+          if (!data) return
+          const valid = new Set(flatKeysAll())
+          setSelKeys((prev) => {
+            if (prev.size === 0) return prev
+            let changed = false
+            const next = new Set()
+            for (const k of prev) { if (valid.has(k)) next.add(k); else changed = true }
+            return changed ? next : prev
+          })
+          if (anchorRef.current && !valid.has(anchorRef.current)) anchorRef.current = null
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [data])
+
+        // 激活行随操作移组/消失时自动关闭 diff 抽屉，避免抽屉展示过期内容
+        React.useEffect(() => {
+          if (!data || !diffSel || diffSel.repoId !== repo.id) return
+          const list = data[diffSel.group]
+          const alive = Array.isArray(list) && list.some((f) => f.path === diffSel.path)
+          if (!alive && onCloseDiff) onCloseDiff()
+        }, [data, diffSel, repo.id, onCloseDiff])
+
+        // Esc 分层：确认弹窗 > 清空多选 > 关 diff 抽屉。capture 阶段拦截，阻止抽屉的
+        // bubble 阶段 Esc 监听在同一按键里同时触发（先关弹窗又顺手关掉抽屉）。
+        React.useEffect(() => {
+          const onKey = (e) => {
+            if (e.key !== 'Escape') return
+            if (confirmDiscard) { setConfirmDiscard(null); e.stopPropagation(); return }
+            if (selKeys.size > 0) { setSelKeys(new Set()); e.stopPropagation() }
+          }
+          window.addEventListener('keydown', onKey, true)
+          return () => window.removeEventListener('keydown', onKey, true)
+        }, [confirmDiscard, selKeys])
+
+        // 文件行点击：普通 = 单选并打开/关闭 diff（同一行再次点击 = 取消选中并关闭抽屉）；
+        // Ctrl/⌘ = 增删多选；Shift = 锚点到当前行的范围多选。修饰键点击不切换 diff
+        // （对齐 VS Code SCM：多选只为批量操作服务，diff 抽屉保持当前文件不动）。
+        const onRowClick = (e, f, group) => {
+          const key = rowKey(group, f.path)
+          if (e.shiftKey) {
+            let from = anchorRef.current != null && flatKeys.indexOf(anchorRef.current) >= 0 ? anchorRef.current
+              : (activeKey != null && flatKeys.indexOf(activeKey) >= 0 ? activeKey : key)
+            const i = flatKeys.indexOf(from)
+            const j = flatKeys.indexOf(key)
+            if (i >= 0 && j >= 0) setSelKeys(new Set(flatKeys.slice(Math.min(i, j), Math.max(i, j) + 1)))
+            else setSelKeys(new Set([key]))
+            return
+          }
+          anchorRef.current = key
+          if (e.ctrlKey || e.metaKey) {
+            setSelKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
+            return
+          }
+          setSelKeys(new Set())
+          onOpenDiff(repo, f, group)
+        }
+
+        // 多选分区：unstage 仅对 staged；stage 对 unstaged+untracked；放弃须按组分别调用
+        const selParts = React.useMemo(() => {
+          const byGroup = { staged: [], unstaged: [], untracked: [] }
+          if (data) {
+            for (const g of ['staged', 'unstaged', 'untracked']) {
+              const map = new Map((data[g] || []).map((f) => [rowKey(g, f.path), f.path]))
+              for (const k of selKeys) { const p = map.get(k); if (p != null) byGroup[g].push(p) }
+            }
+          }
+          return byGroup
+        }, [selKeys, data])
+        const selCount = selParts.staged.length + selParts.unstaged.length + selParts.untracked.length
+
+        // 放弃更改确认：所有入口（单行 / 组全部 / 多选批量）统一先弹确认
+        const askDiscard = (paths, group) => {
+          if (!paths || paths.length === 0) return
+          const byGroup = { staged: [], unstaged: [], untracked: [] }
+          byGroup[group] = paths.slice()
+          setConfirmDiscard({ byGroup, count: paths.length })
+        }
+        const askDiscardSelection = () => {
+          if (selCount === 0) return
+          setConfirmDiscard({ byGroup: { staged: selParts.staged.slice(), unstaged: selParts.unstaged.slice(), untracked: selParts.untracked.slice() }, count: selCount })
+        }
+        const doDiscardConfirmed = async () => {
+          const parts = confirmDiscard && confirmDiscard.byGroup
+          setConfirmDiscard(null)
+          if (!parts) return
+          let allOk = true
+          for (const g of ['staged', 'unstaged', 'untracked']) {
+            if (parts[g] && parts[g].length > 0 && (await discard(parts[g], g)) !== 'ok') allOk = false
+          }
+          if (allOk) setSelKeys(new Set())
+        }
+        const discardPreviewText = (cd) => {
+          const names = []
+          for (const g of ['staged', 'unstaged', 'untracked']) for (const p of cd.byGroup[g]) names.push(p)
+          const MAX = 5
+          return names.length > MAX ? names.slice(0, MAX).join('\n') + '\n' + fmt(tr('discardMore'), { n: names.length - MAX }) : names.join('\n')
+        }
+
         const renderGroup = (group, list) => {
           list = list || []
           // 「更改」为空时仍保留标题行（占位提示）；「暂存的更改」「未跟踪的更改」为空时整组隐藏
@@ -1338,7 +1557,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               React.createElement('span', { className: 'gp-section-label' }, tr(meta.titleKey)),
               React.createElement('span', { className: 'gp-spacer' }),
               hasItems ? React.createElement('span', { className: 'gp-row-actions' },
-                React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardAll'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); discard(paths, group) } }, icon('discard')),
+                React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardAll'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); askDiscard(paths, group) } }, icon('discard')),
                 isStaged
                   ? React.createElement('button', { className: 'gp-icon-btn', title: tr('unstageAll'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); unstage(paths) } }, icon('minus'))
                   : React.createElement('button', { className: 'gp-icon-btn', title: fmt(tr('stageAll'), { n: list.length }), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stage(paths) } }, icon('plus'))) : null,
@@ -1349,20 +1568,57 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               const seg = trimmed.split('/').pop() || f.path
               const base = f.path.endsWith('/') ? seg + '/' : seg
               const dir = trimmed.length > seg.length ? trimmed.slice(0, trimmed.length - seg.length).replace(/\/+$/, '') : ''
-              return React.createElement('div', { className: 'gp-file-row', key: group + ':' + f.path, title: f.path, onClick: () => onOpenDiff(repo, f, group) },
+              const key = rowKey(group, f.path)
+              const cls = 'gp-file-row' + (activeKey === key ? ' gp-file-active' : '') + (selKeys.has(key) ? ' gp-file-sel' : '')
+              return React.createElement('div', {
+                className: cls, key: group + ':' + f.path, title: f.path,
+                // 修饰键点击阻止原生文本选区/焦点抢占（Shift 框选会带出蓝色选区）
+                onMouseDown: (e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault() },
+                onClick: (e) => onRowClick(e, f, group)
+              },
                 React.createElement('span', { className: 'gp-file-dot ' + gl.cls }, '•'),
                 React.createElement('span', { className: 'gp-file-name' }, base),
                 dir ? React.createElement('span', { className: 'gp-file-dir' }, dir) : null,
                 f.orig ? React.createElement('span', { className: 'gp-file-orig', title: f.orig }, '← ' + (f.orig.replace(/\/+$/, '').split('/').pop() || f.orig)) : null,
                 React.createElement('span', { className: 'gp-spacer' }),
                 React.createElement('span', { className: 'gp-row-actions' },
-                  React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardFile'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); discard([f.path], group) } }, icon('discard')),
+                  React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardFile'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); discardFromRow(key, f.path, group) } }, icon('discard')),
                   isStaged
-                    ? React.createElement('button', { className: 'gp-icon-btn', title: tr('unstage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); unstage([f.path]) } }, icon('minus'))
-                    : React.createElement('button', { className: 'gp-icon-btn', title: tr('stage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stage([f.path]) } }, icon('plus'))),
+                    ? React.createElement('button', { className: 'gp-icon-btn', title: tr('unstage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); unstageFromRow(key, f.path) } }, icon('minus'))
+                    : React.createElement('button', { className: 'gp-icon-btn', title: tr('stage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stageFromRow(key, f.path) } }, icon('plus'))),
                 React.createElement('span', { className: 'gp-file-badge ' + gl.cls }, gl.g))
             }))
         }
+
+        // 批量操作（VS Code 语义，无独立工具栏）：多选后点击任一选中行的
+        // 放弃/暂存/取消暂存按钮即作用于全部选中文件；点击未选中行的按钮仅作用于该行
+        const inSelection = (key) => selKeys.has(key) && selCount > 0
+        const stageFromRow = async (key, path) => {
+          if (!inSelection(key)) { stage([path]); return }
+          if ((await stage(selParts.unstaged.concat(selParts.untracked))) === 'ok') setSelKeys(new Set())
+        }
+        const unstageFromRow = async (key, path) => {
+          if (!inSelection(key)) { unstage([path]); return }
+          if ((await unstage(selParts.staged)) === 'ok') setSelKeys(new Set())
+        }
+        const discardFromRow = (key, path, group) => {
+          if (inSelection(key)) askDiscardSelection()
+          else askDiscard([path], group)
+        }
+
+        // 放弃更改确认弹窗（单行 / 组全部 / 多选批量统一入口；Esc 由上方分层处理关闭）
+        const discardModal = confirmDiscard ? React.createElement('div', { className: 'gp-modal-backdrop', onClick: (e) => { e.stopPropagation(); setConfirmDiscard(null) } },
+          React.createElement('div', { className: 'gp-modal gp-modal-sm', onClick: (e) => e.stopPropagation() },
+            React.createElement('div', { className: 'gp-modal-head' }, icon('warning', 15), tr('discardTitle')),
+            React.createElement('div', { className: 'gp-modal-body' },
+              React.createElement('div', { className: 'gp-confirm-summary' },
+                fmt(confirmDiscard.count === 1 ? tr('discardConfirm1') : tr('discardConfirmN'), { n: confirmDiscard.count })),
+              React.createElement('div', { className: 'gp-confirm-note gp-danger' }, tr('discardIrreversible')),
+              confirmDiscard.byGroup.untracked.length > 0 ? React.createElement('div', { className: 'gp-confirm-note' }, tr('discardUntrackedNote')) : null,
+              React.createElement('div', { className: 'gp-confirm-files' }, discardPreviewText(confirmDiscard))),
+            React.createElement('div', { className: 'gp-modal-foot' },
+              React.createElement('button', { className: 'gp-btn', onClick: () => setConfirmDiscard(null) }, tr('cancel')),
+              React.createElement('button', { className: 'gp-btn gp-btn-danger', onClick: doDiscardConfirmed }, tr('discardOk'))))) : null
 
         const head = React.createElement('div', { className: 'gp-repo-head', onClick: () => setCollapsed((c) => !c) },
           React.createElement('button', { className: 'gp-btn-icon', onClick: (e) => { e.stopPropagation(); setCollapsed((c) => !c) } }, icon(isCollapsed ? 'chevronRight' : 'chevronDown')),
@@ -1417,7 +1673,10 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               tr('history')),
             historyOpen ? React.createElement(GitGraphView, { repo }) : null)
 
-        return React.createElement('div', { className: 'gp-repo-card' }, head, body)
+        // 确认弹窗用 fixed 定位，放在卡片外层（Fragment），避免任何卡片内堆叠上下文干扰
+        return React.createElement(React.Fragment, null,
+          React.createElement('div', { className: 'gp-repo-card' }, head, body),
+          discardModal)
       }
 
       function workspaceOfSession(st, sessionId) {
@@ -1436,6 +1695,16 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const wsTitle = typeof useWorkspaces === 'function' ? useWorkspaces((st) => { const w = workspaceOfSession(st, sessionId); return w && w.title ? w.title : '' }) : ''
         const [scan, setScan] = React.useState({ state: 'idle', root: '', repos: [], error: '' })
         const [diffSel, setDiffSel] = React.useState(null)
+        // 关闭动效（关闭相位由 diffSel.closing 携带，所有关闭入口统一走 requestCloseDiff）：
+        // 标记 closing → 抽屉反向滑出（~240ms）→ finishCloseDiff 才真正卸载；期间点击别的
+        // 文件会整体替换 diffSel（closing 复位），finishCloseDiff 检测到非 closing 相位即空操作，
+        // 抽屉保持打开直接切换内容（与旧版「关闭中途换文件」的闪断行为说再见）
+        const requestCloseDiff = React.useCallback(() => {
+          setDiffSel((prev) => (prev && !prev.closing ? { ...prev, closing: true } : prev))
+        }, [])
+        const finishCloseDiff = React.useCallback(() => {
+          setDiffSel((prev) => (prev && prev.closing ? null : prev))
+        }, [])
         const [follow, setFollow] = React.useState(true)
         const [resizing, setResizing] = React.useState(false)
         const initialDoneRef = React.useRef(false)
@@ -1444,11 +1713,13 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         // 「跟随 workspace 的快扫描」的成功结果（竞态会让面板显示错误的空列表）
         const scanSeqRef = React.useRef(0)
 
-        const doScan = React.useCallback(async (root) => {
+        // force=true 时绕过 host 端扫描缓存（手动「重新扫描」按钮）；跟随 workspace
+        // 的自动扫描与手动选根目录都允许命中缓存（切换项目秒开的关键路径）
+        const doScan = React.useCallback(async (root, force) => {
           const seq = ++scanSeqRef.current
           setScan((x) => ({ ...x, state: 'scanning', error: '' }))
           try {
-            const res = await callRpc('scan', root ? { root } : {})
+            const res = await callRpc('scan', root ? (force ? { root, force: true } : { root }) : {})
             if (seq !== scanSeqRef.current) return
             if (res && res.ok) {
               setScan({ state: 'done', root: res.root, repos: res.repos || [], error: '' })
@@ -1540,12 +1811,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const diffRepo = diffSel ? scan.repos.find((r) => r.id === diffSel.repoId) : null
 
         const header = React.createElement('div', { className: 'gp-header' },
-          React.createElement('span', { className: 'gp-title' }, icon('branch', 15), 'Git Panel'),
+          React.createElement('button', { className: 'gp-title gp-title-btn', title: tr('collapseTitle'), onClick: () => { saveCollapsed(true); setDiffSel(null); store.set((st) => ({ ...st, collapsed: true })) } }, icon('branch', 15), 'Git Panel'),
           follow ? React.createElement('span', { className: 'gp-chip gp-follow-chip', title: tr('followTitle') }, fmt(tr('followChip'), { s: wsTitle || (wsPath ? wsPath.split(/[\\/]/).filter(Boolean).pop() : '—') })) : null,
           !follow && wsPath ? React.createElement('button', { className: 'gp-btn', style: { fontSize: 11, padding: '2px 8px' }, title: tr('followResumeTitle'), onClick: () => { setFollow(true); doScan(wsPath) } }, tr('followResume')) : null,
           scan.root ? React.createElement('span', { className: 'gp-root', title: scan.root }, scan.root) : null,
           React.createElement('div', { className: 'gp-header-actions' },
-            React.createElement('button', { className: 'gp-btn-icon', title: tr('rescan'), onClick: () => doScan(follow ? (wsPath || scan.root) : scan.root) }, icon('refresh')),
+            React.createElement('button', { className: 'gp-btn-icon', title: tr('rescan'), onClick: () => doScan(follow ? (wsPath || scan.root) : scan.root, true) }, icon('refresh')),
             React.createElement('button', { className: 'gp-btn-icon', title: tr('pickRoot'), onClick: async () => { if (workspaces && workspaces.pickDirectory) { const p = await workspaces.pickDirectory().catch(() => null); if (p) { setFollow(false); doScan(p) } } } }, icon('folder')),
             React.createElement('button', { className: 'gp-btn-icon', title: tr('close'), onClick: () => store.set((st) => ({ ...st, panelOpen: false })) }, icon('close'))))
 
@@ -1553,10 +1824,28 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           scan.state === 'scanning' || scan.state === 'idle' ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), scan.state === 'idle' ? ' ' + tr('locating') : ' ' + tr('scanning')) :
             scan.state === 'error' ? React.createElement('div', { className: 'gp-empty' }, scan.error) :
               scan.repos.length === 0 ? React.createElement('div', { className: 'gp-empty' }, tr('noRepos')) :
-                scan.repos.map((r) => React.createElement(RepoCard, { key: r.id, repo: r, sessionId, onOpenDiff: (repo, f, group) => setDiffSel({ repoId: repo.id, path: f.path, group, x: f.x, y: f.y }) })))
+                scan.repos.map((r) => React.createElement(RepoCard, {
+                  key: r.id, repo: r, sessionId, diffSel, onCloseDiff: requestCloseDiff,
+                  // 普通点击行 = 单选该行并打开 diff；再次点击同一行（同 repo 同组同路径）=
+                  // 进入关闭相位（抽屉滑出动效播完才卸载，见 requestCloseDiff/finishCloseDiff）
+                  onOpenDiff: (repo2, f, group) => setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group
+                    ? { ...prev, closing: true }
+                    : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y })
+                })))
+
+        // 折叠态：渲染 44px 竖条（整条可点展开）。panelOpen 语义不变，自动刷新轮询继续；
+        // diff 抽屉在折叠时已关闭（折叠动作里 setDiffSel(null)），此处无需渲染
+        if (s.collapsed) {
+          return React.createElement('button', {
+            className: 'gp-rail', title: tr('expandTitle'),
+            onClick: () => { saveCollapsed(false); store.set((st) => ({ ...st, collapsed: false })) }
+          },
+            icon('branch', 16),
+            React.createElement('span', { className: 'gp-rail-label' }, 'Git Panel'))
+        }
 
         return React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'gp-panel', style: { width: s.panelW + 'px' } },
+          React.createElement('div', { className: 'gp-panel' + (resizing ? ' gp-noanim' : ''), style: { width: s.panelW + 'px' } },
             React.createElement('div', {
               className: 'gp-resize' + (resizing ? ' gp-resize-active' : ''),
               title: tr('resizeTitle'),
@@ -1564,7 +1853,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
             }),
             header,
             React.createElement('div', { className: 'gp-main' }, body)),
-          diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: s.panelW, onClose: () => setDiffSel(null) }) : null)
+          diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: s.panelW, onClose: finishCloseDiff, onRequestClose: requestCloseDiff }) : null)
       }
 
       slots.inject('shell.overlay', () => slots.register(

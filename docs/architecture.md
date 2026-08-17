@@ -4,8 +4,9 @@
 
 插件分 Host / Client 两个半体，经 `ctx.connection.rpc` 通道（`/git-panel`）通信：
 
-- **Host 半体**（`src/host.js`）：git 执行层、仓库发现、规则读写、审计日志、
-  LLM 生成、面向 Client 的 JSON RPC；
+- **Host 半体**（`src/host.js`）：git 执行层、仓库发现（BFS + 内存/磁盘两级扫描缓存，
+  命中即回、后台静默重扫 self-heal）、规则读写、审计日志、LLM 生成、
+  面向 Client 的 JSON RPC；
 - **Client 半体**（`src/client.js`）：面板全部 UI（`React.createElement`，无 JSX），
   Slot 注入 + 样式 + zh/en 文案。
 
@@ -19,7 +20,8 @@
   （`document`/`window`/`setTimeout` 等按需探测）→ 剪贴板由 Host 经 `cmd /c clip` 写入，
   定时器优先用 `timer` 服务、缺失时退回原生定时器。
 - **进程执行安全**：所有 git 命令参数 100% 数组化绝不拼接 shell；批量文件操作经
-  stdin 传 pathspec（`--pathspec-from-file=-`，规避 Windows ~32K 命令行上限，需 git ≥ 2.26）；
+  stdin 传 pathspec（`--pathspec-from-file=-`，规避 Windows ~32K 命令行上限，需 git ≥ 2.26；
+  例外：`git clean` 至今不支持该选项，放弃未跟踪文件改走普通 argv pathspec 分片）；
   `stdin: 'ignore'` + `GIT_TERMINAL_PROMPT=0` 防交互挂起（无凭据时快速失败）；
   stdout 有界收集 + spill 文件；超时后树级 terminate。
 
@@ -27,7 +29,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `src/host.js` | Host 半体：git 执行层（参数 100% 数组化、批量 pathspec 走 stdin）、BFS 仓库发现、提交规则读写、审计日志、LLM 生成、面向 Client 的 JSON RPC |
+| `src/host.js` | Host 半体：git 执行层（参数 100% 数组化、批量 pathspec 走 stdin）、BFS 仓库发现 + 两级扫描缓存（内存 + `$DSH_HOME/git-panel/scan-cache.json`）、提交规则读写、审计日志、LLM 生成、面向 Client 的 JSON RPC |
 | `src/client.js` | Client 半体：面板全部 UI（`React.createElement`，无 JSX），Slot 注入 + 样式 + zh/en 文案 |
 | `src/index.js` | 文件形态 Host 入口（re-export `src/host.js` 默认导出；`./client` 子路径导出 Client 半体） |
 | `scripts/build.mjs` | 构建：生成 `lib/index.js`（对象形态 host 入口 + inject）、`lib/client.js`（ModuleLoader bundle） |

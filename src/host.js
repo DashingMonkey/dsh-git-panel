@@ -1,7 +1,8 @@
 /**
  * git-panel — Host 半体
  *
- * 职责：git 执行层（数组化参数，绝不拼接 shell）、递归仓库发现、
+ * 职责：git 执行层（数组化参数，绝不拼接 shell）、递归仓库发现、仓库发现结果
+ * 两级缓存（内存 + $DSH_HOME/git-panel/scan-cache.json，命中即回 + 后台静默重扫）、
  * 提交规则读写（$DSH_HOME/git-rules/）、审计日志（$DSH_HOME/git-logs/）、
  * LLM 提交信息生成，以及面向 Client 的 package-private JSON RPC。
  *
@@ -277,7 +278,9 @@ export default function () {
 
       // 批量文件参数统一走 --pathspec-from-file=-（NUL 分隔 + stdin），
       // 规避 Windows ~32K 命令行长度上限（与 commit message 走 stdin 同一思路）；
-      // 需要 git ≥ 2.26（add/reset/restore/rm/checkout/clean 均支持）。
+      // 需要 git ≥ 2.26。⚠ 例外：git clean 至今（含 2.51）不支持该选项
+      // （add/reset/restore/rm/checkout/commit/stash 支持，clean 不支持），
+      // 放弃未跟踪文件的批量删除走 chunkPathspecs 的普通 argv 分片（见 opDiscard）。
       // ⚠ git 选项名来自 NUL 字符（ASCII 0），结尾没有 "l"——拼成 null 结尾会被
       // git 报 unknown option、批量操作全部失败。该字符串全文件仅下面常量一处拼写，
       // 使用点一律引用 OPT_PATHSPEC_FILE_NUL，勿内联重写、勿“顺手纠正”；
@@ -286,6 +289,29 @@ export default function () {
       function gitRunFiles(repoPath, args, files, opts) {
         opts = Object.assign({}, opts, { stdinData: files.join('\u0000') })
         return gitRun(repoPath, args.concat(['--pathspec-from-file=-', OPT_PATHSPEC_FILE_NUL]), opts)
+      }
+
+      // git clean 不支持 --pathspec-from-file，只能走普通 argv pathspec（-- 分隔）；
+      // 按累计长度 + 条数分片，规避 Windows ~32K 命令行上限与超长 argv 风险。
+      const ARGV_PATHSPEC_BYTES = 16000
+      const ARGV_PATHSPEC_COUNT = 500
+      function chunkPathspecs(files) {
+        const chunks = []
+        let cur = []
+        let len = 0
+        for (const f of files) {
+          const s = String(f)
+          const cost = s.length + 1
+          if (cur.length > 0 && (len + cost > ARGV_PATHSPEC_BYTES || cur.length >= ARGV_PATHSPEC_COUNT)) {
+            chunks.push(cur)
+            cur = []
+            len = 0
+          }
+          cur.push(s)
+          len += cost
+        }
+        if (cur.length > 0) chunks.push(cur)
+        return chunks
       }
 
       // commit 的 message 已占 stdin，部分提交的 pathspec 改落 .git 下临时文件
@@ -476,8 +502,9 @@ export default function () {
       }
 
       // ============ 仓库发现（BFS，跳过重目录，上限防失控） ============
-      async function scanRepos(root) {
-        repos.clear()
+      // discoverRepos 是纯发现函数（不碰全局 repos 表），结果统一由 activateRepos
+      // 激活——扫描缓存命中路径也走同一入口，保证 repos 表语义唯一。
+      async function discoverRepos(root) {
         let rootTarget
         try { rootTarget = await fs.resolve(root) } catch (e) { return fail(fmt(tr('errBadDir'), { p: root })) }
         let info = null
@@ -505,6 +532,7 @@ export default function () {
         found.sort((a, b) => a.path.localeCompare(b.path))
         const rootNorm = (fs.processPath(rootTarget) || root).replace(/[\\/]+$/, '')
         const seen = new Set()
+        const list = []
         for (const r of found) {
           let rel = r.path
           if (r.path === rootNorm) rel = '.'
@@ -512,9 +540,136 @@ export default function () {
           const id = rel === '.' ? r.name : rel
           if (seen.has(id)) continue
           seen.add(id)
-          repos.set(id, { id, name: r.name, path: r.path, rel })
+          list.push({ id, name: r.name, path: r.path, rel })
         }
-        return ok({ root: rootNorm, count: repos.size, repos: Array.from(repos.values()) })
+        return ok({ root: rootNorm, count: list.length, repos: list })
+      }
+
+      // repos 表只保留「当前激活 root」的仓库：repoId 是 root 内相对路径，跨 root 可冲突
+      function activateRepos(list) {
+        repos.clear()
+        for (const r of list) repos.set(r.id, r)
+      }
+
+      // ============ 扫描缓存（内存 + $DSH_HOME 磁盘两级） ============
+      // 动机：大项目全量 BFS 很慢，而仓库列表是低频变化数据。
+      //   - 内存层：进程内按 root 缓存，切换项目再切回秒开；
+      //   - 磁盘层：$DSH_HOME/git-panel/scan-cache.json，重启 dsh web 后首扫也能命中；
+      //   - 新鲜度：命中时并行 stat 每条 repo 的 .git（过滤已删除仓库），同时后台静默
+      //     重扫 self-heal（新克隆的仓库下次激活生效）；面板「重新扫描」按钮带 force
+      //     始终走全扫，是用户可见的兜底刷新手段。
+      const SCAN_CACHE_TTL_MS = 7 * 24 * 3600 * 1000 // 磁盘层卫生 TTL（条目新鲜度靠校验与后台重扫，不靠 TTL）
+      const SCAN_CACHE_MAX_ROOTS = 50
+      const scanCache = new Map() // rootCacheKey(root) → { root, scannedAt, repos: [{id,name,path,rel}] }
+      let scanCacheLoadPromise = null
+      let scanCacheWriteChain = Promise.resolve()
+      const inflightRescans = new Set() // 后台重扫 single-flight（按 root key）
+      let currentRootKey = null // 最近一次 scan RPC 激活的 root（后台重扫激活守卫）
+
+      // 缓存键规范化：盘符大小写与 '/' / '\\' 变体对齐，去尾部分隔符；
+      // POSIX 上反斜杠是合法文件名字符，仅对盘符开头的路径做斜杠归一
+      function rootCacheKey(root) {
+        let p = String(root || '').trim().replace(/[\\/]+$/, '')
+        if (/^[A-Za-z]:/.test(p)) p = p[0].toUpperCase() + p.slice(1).replace(/\//g, '\\')
+        return p
+      }
+
+      async function scanCacheFilePath() {
+        const home = await dshHome()
+        return home ? joinPath(home, 'git-panel', 'scan-cache.json') : null
+      }
+
+      // 磁盘缓存只在首次 scan 时读取一次；损坏 JSON / 过期 / 结构不符的条目静默丢弃
+      function loadScanCache() {
+        if (scanCacheLoadPromise) return scanCacheLoadPromise
+        scanCacheLoadPromise = (async () => {
+          const p = await scanCacheFilePath()
+          if (!p) return
+          const raw = await fsReadText(p)
+          if (!raw) return
+          let data = null
+          try { data = JSON.parse(raw) } catch (e) { return }
+          const entries = data && Array.isArray(data.entries) ? data.entries : []
+          const now = Date.now()
+          for (const e of entries) {
+            if (!e || typeof e.root !== 'string' || !Array.isArray(e.repos)) continue
+            if (typeof e.scannedAt !== 'number' || now - e.scannedAt > SCAN_CACHE_TTL_MS) continue
+            const reposList = []
+            let bad = false
+            for (const r of e.repos) {
+              if (!r || typeof r.id !== 'string' || typeof r.name !== 'string' || typeof r.path !== 'string' || typeof r.rel !== 'string') { bad = true; break }
+              reposList.push({ id: r.id, name: r.name, path: r.path, rel: r.rel })
+            }
+            if (bad) continue
+            scanCache.set(rootCacheKey(e.root), { root: e.root, scannedAt: e.scannedAt, repos: reposList })
+          }
+        })().catch(() => {})
+        return scanCacheLoadPromise
+      }
+
+      // 写盘串行化（与 audit 同一理由：整体回写非原子，并发写会互相覆盖）
+      function scheduleScanCacheSave() {
+        scanCacheWriteChain = scanCacheWriteChain.then(async () => {
+          const p = await scanCacheFilePath()
+          if (!p) return
+          const entries = Array.from(scanCache.values())
+            .sort((a, b) => b.scannedAt - a.scannedAt)
+            .slice(0, SCAN_CACHE_MAX_ROOTS)
+          const okW = await writeTextAnywhere(p, JSON.stringify({ version: 1, entries }, null, 2) + '\n')
+          if (!okW) console.error('[git-panel] 扫描缓存写盘失败: ' + p)
+        }).catch(() => {})
+        return scanCacheWriteChain
+      }
+
+      function updateScanCache(rootNorm, list) {
+        const key = rootCacheKey(rootNorm)
+        scanCache.delete(key) // delete+set：刷新插入序（LRU 语义由写盘时按 scannedAt 排序截断兜底）
+        scanCache.set(key, { root: rootNorm, scannedAt: Date.now(), repos: list })
+        scheduleScanCacheSave()
+      }
+
+      // 命中校验：并行 stat 每条 repo 的 .git（目录形态，或 worktree/submodule 的
+      // .git 文件形态），过滤已删除/已移走的仓库；几十条的开销远低于一次全量 BFS
+      async function validateCachedRepos(list) {
+        const checks = await Promise.all(list.map(async (r) => {
+          try {
+            const t = await fs.resolve(joinPath(r.path, '.git'))
+            const st = await fs.stat(t)
+            return st && (st.type === 'directory' || st.type === 'file') ? r : null
+          } catch (e) { return null }
+        }))
+        return checks.filter(Boolean)
+      }
+
+      function repoListSignature(list) {
+        return list.map((r) => r.id + ' ' + r.path).join('\u0001')
+      }
+
+      // 后台静默重扫（single-flight）：仓库集有变化时更新缓存；
+      // 仅当该 root 仍是面板当前激活 root 时才替换 live repos 表——否则用户已切走，
+      // 不能把别的 root 的仓库灌进来（竞态守卫，check 与 activate 之间无 await）
+      function backgroundRescan(root) {
+        const key = rootCacheKey(root)
+        if (inflightRescans.has(key)) return
+        inflightRescans.add(key)
+        discoverRepos(root).then((res) => {
+          inflightRescans.delete(key)
+          if (!res || !res.ok) return
+          const prev = scanCache.get(key)
+          if (prev && repoListSignature(prev.repos) === repoListSignature(res.repos)) return
+          updateScanCache(res.root, res.repos)
+          if (currentRootKey === key) activateRepos(res.repos)
+        }, () => { inflightRescans.delete(key) })
+      }
+
+      // 全量扫描（force / 缓存未命中路径）：激活结果并刷新两级缓存
+      async function scanRepos(root) {
+        const res = await discoverRepos(root)
+        if (res.ok) {
+          activateRepos(res.repos)
+          updateScanCache(res.root, res.repos)
+        }
+        return res
       }
 
       // ============ git 状态（porcelain v1 -z） ============
@@ -975,8 +1130,13 @@ export default function () {
           return ok({ summary: fmt(tr('discardedN'), { n: files.length }) })
         }
         if (group === 'untracked') {
-          const r = await gitRunFiles(repo.path, ['clean', '-fd'], files, { maxBytes: 256 * 1024, timeoutMs: 120000 })
-          if (r.code !== 0) return fail(fmt(tr('errDiscard'), { e: (r.errText || r.text).slice(0, 300) }))
+          // git clean 不支持 --pathspec-from-file（git 2.51 实测仍报 unknown option），
+          // 不能走 gitRunFiles；用普通 argv pathspec，超长/超量时按批执行。
+          const chunks = chunkPathspecs(files)
+          for (const chunk of chunks) {
+            const r = await gitRun(repo.path, ['clean', '-fd', '--'].concat(chunk), { maxBytes: 256 * 1024, timeoutMs: 120000 })
+            if (r.code !== 0) return fail(fmt(tr('errDiscard'), { e: (r.errText || r.text).slice(0, 300) }))
+          }
           return ok({ summary: fmt(tr('discardedN'), { n: files.length }) })
         }
         const r = await run(['checkout'])
@@ -1030,7 +1190,43 @@ export default function () {
         // 且其慢速响应晚到会与后续携带 root 的扫描竞态。改为快速失败，由面板
         // 跟随逻辑在就绪后携带明确 root 重试。
         if (!root) return fail(tr('errNoRoot'))
-        await audit({ op: 'scan', repo: root })
+        // force=true（面板「重新扫描」按钮）绕过缓存全量重扫，是用户可见的兜底刷新
+        const force = args.force === true
+        await audit({ op: force ? 'scan-force' : 'scan', repo: root })
+        await loadScanCache()
+        const key = rootCacheKey(root)
+        if (!force && scanCache.has(key)) {
+          const hit = scanCache.get(key)
+          // 空列表条目没有 .git 可校验，改为校验 root 目录本身仍存在（与
+          // discoverRepos 的 errBadDir/errNotDir 同口径）——已删除的 root 不能
+          // 「秒回空列表」，须丢弃条目回退全量扫描走报错路径
+          let rootAlive = true
+          if (hit.repos.length === 0) {
+            rootAlive = false
+            try {
+              const t = await fs.resolve(hit.root)
+              const st = await fs.stat(t)
+              rootAlive = !!(st && st.type === 'directory')
+            } catch (e) { /* root 已不存在 */ }
+          }
+          // 命中：先并行校验每条 repo 的 .git 仍存在（防显示已删仓库），再秒回缓存
+          // 结果；后台静默重扫负责发现新增仓库（self-heal，差异在下次激活时生效）
+          const valid = await validateCachedRepos(hit.repos)
+          if (rootAlive && (hit.repos.length === 0 || valid.length > 0)) {
+            currentRootKey = key
+            activateRepos(valid)
+            if (valid.length !== hit.repos.length) updateScanCache(hit.root, valid)
+            backgroundRescan(root)
+            await ensureDefaultRules()
+            return ok({ root: hit.root, count: valid.length, repos: valid, cached: true })
+          }
+          // 缓存条目整体失效（根目录被移走等）：丢弃该条目，回退全量扫描
+          scanCache.delete(key)
+          scheduleScanCacheSave()
+        }
+        // 发起扫描前同步置激活标志（与缓存命中路径一致），scanRepos 完成时据此
+        // 守卫激活——期间用户切走则只更新缓存、不动 live 表
+        currentRootKey = key
         const res = await scanRepos(root)
         await ensureDefaultRules()
         return res

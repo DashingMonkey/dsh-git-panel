@@ -12,6 +12,11 @@
   BFS 递归发现嵌套 Git 仓库（含 worktree 的 `.git` 文件形态）；跳过 `node_modules`/
   `dist`/`build` 等重目录；上限：深度 10 / 2000 目录 / 50 仓库（文件形态下可经组合行
   config 的 `scanMaxDepth`/`scanMaxDirs`/`scanMaxRepos` 覆盖，见[安装详解](install.md)）。
+- **扫描结果两级缓存**：扫描结果按根目录缓存在内存中，并持久化到
+  `$DSH_HOME/git-panel/scan-cache.json`（上限 50 个根、7 天过期）。切换项目再切回、
+  或重启 dsh web 后首次打开，直接秒回缓存列表；命中时会并行校验每个仓库的 `.git`
+  是否仍存在（过滤已删除的仓库），并在后台静默重扫一次自我修正（新克隆的仓库在
+  下次切换/扫描时出现）。标题栏的刷新图标始终绕过缓存全量重扫，是兜底刷新手段。
 - 每个仓库一张可折叠卡片：仓库名、当前分支、staged/unstaged/untracked 彩色圆点计数、
   ↓↑ 落后/领先，以及刷新、Pull、分支、⋯ 更多按钮。
 - **面板宽度可拖拽调整**：拖动左缘实时改宽（380px ~ 96vw），宽度记忆在 localStorage
