@@ -80,4 +80,5 @@ npx @deepseek-ai/dsh plugin --profile web add ./dsh-local-git-panel-1.0.0.tgz
 - 迁移 = 拷贝本目录，在目标机器执行 `node scripts/install.mjs`（自带构建；或
   `./install.sh`），重启 `npx @deepseek-ai/dsh web`（见上文各安装方式）。
 - 可选数据：`$DSH_HOME/git-panel/rules/`（提交规则，缺失会自动重建默认）；`$DSH_HOME/
-  git-panel/logs/` 仅留档可不迁移。目标机器的 `$DSH_HOME` 由插件自行推导，无硬编码路径。
+  git-panel/git-repos.json`（每仓库规则来源偏好，路径 keyed，换机器后需按新路径重建）；
+  `$DSH_HOME/git-panel/logs/` 仅留档可不迁移。目标机器的 `$DSH_HOME` 由插件自行推导，无硬编码路径。

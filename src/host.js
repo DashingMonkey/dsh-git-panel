@@ -3,7 +3,8 @@
  *
  * 职责：git 执行层（数组化参数，绝不拼接 shell）、递归仓库发现、仓库发现结果
  * 两级缓存（内存 + $DSH_HOME/git-panel/scan-cache.json，命中即回 + 后台静默重扫）、
- * 提交规则读写（$DSH_HOME/git-panel/rules/）、审计日志（$DSH_HOME/git-panel/logs/）、
+ * 提交规则读写（$DSH_HOME/git-panel/rules/）与每仓库生效来源偏好（git-repos.json，
+ * 权威配置非缓存）、审计日志（$DSH_HOME/git-panel/logs/）、
  * LLM 提交信息生成，以及面向 Client 的 package-private JSON RPC。
  *
  * 依赖的 Host 服务（全部 ctx.get 可选读取）：
@@ -109,6 +110,27 @@ export default function () {
       ]
 
       function sanitizeName(name) { return String(name || 'repo').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 80) }
+
+      // 路径键规范化：盘符大小写与 '/' / '\\' 变体对齐，去尾部分隔符。
+      // 扫描缓存键与 git-repos.json 注册表键共用——同一路径必须得到同一键。
+      // POSIX 上反斜杠是合法文件名字符，仅对盘符开头的路径做斜杠归一。
+      function normPathKey(p) {
+        let s = String(p || '').trim().replace(/[\\/]+$/, '')
+        if (/^[A-Za-z]:/.test(s)) s = s[0].toUpperCase() + s.slice(1).replace(/\//g, '\\')
+        return s
+      }
+
+      // FNV-1a 32 位哈希（8 位十六进制）：仓库专属规则文件名的路径区分后缀。
+      // 确定性生成、不依赖任何注册表——仓库重新出现在同一路径时规则自动恢复生效。
+      function pathHash8(p) {
+        let h = 0x811c9dc5
+        const s = String(p)
+        for (let i = 0; i < s.length; i++) {
+          h ^= s.charCodeAt(i)
+          h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0
+        }
+        return ('0000000' + h.toString(16)).slice(-8)
+      }
       // 内部统一返回扁平结构 {ok:true, ...业务字段} / {ok:false, error:<string>}。
       // RPC 出口（registerRpc 的通道包装）统一转成协议信封 {ok:true,value} / {ok:false,error:{code,...}}——
       // dsh-client-connection 的 client 端 zod 会 strip 非标准字段，业务数据必须放 value。
@@ -162,6 +184,8 @@ export default function () {
           errNoYaml: '缺少 yaml', errRules: '规则校验失败: {e}', errNoSys: '缺少 system_prompt 字段', errNoUser: '缺少 user_context 字段',
           errRulesWrite: '写入失败: {p}',
           rulesSaved: '规则已保存到 {p}', rulesReset: '已重置为默认规则',
+          rulesResetRepo: '已删除仓库专属规则，回退到全局规则',
+          rulesScopeGlobal: '已切换为使用全局规则', rulesScopeRepo: '已切换为使用仓库专属规则',
           copied: '已复制到剪贴板', errCopy: '复制失败: {e}',
           errBranches: '读取分支失败: {e}', errNoBranchName: '缺少分支名',
           errStashList: '读取 stash 失败: {e}', errBadHash: '非法 hash', errBadRef: '非法 stash 引用',
@@ -201,6 +225,8 @@ export default function () {
           errNoYaml: 'Missing yaml', errRules: 'Rules validation failed: {e}', errNoSys: 'Missing system_prompt field', errNoUser: 'Missing user_context field',
           errRulesWrite: 'Write failed: {p}',
           rulesSaved: 'Rules saved to {p}', rulesReset: 'Reset to default rules',
+          rulesResetRepo: 'Repo-specific rules removed; falling back to global rules',
+          rulesScopeGlobal: 'Switched to global rules', rulesScopeRepo: 'Switched to repo-specific rules',
           copied: 'Copied to clipboard', errCopy: 'Copy failed: {e}',
           errBranches: 'Failed to read branches: {e}', errNoBranchName: 'Missing branch name',
           errStashList: 'Failed to read stash: {e}', errBadHash: 'Invalid hash', errBadRef: 'Invalid stash ref',
@@ -383,6 +409,15 @@ export default function () {
         } catch (e) { return false }
       }
 
+      // fs 服务没有删除能力；与 writeTextAnywhere 同通道（脚本固定字面量，路径走 argv）。
+      // force:true 下文件不存在也算成功——删除语义本来就是「确保不存在」。
+      async function removeFileAnywhere(path) {
+        try {
+          const r = await spawnRaw([process.execPath, '-e', "require('fs').rmSync(process.argv[1],{force:true});", path], '.', { timeoutMs: 15000 })
+          return r.code === 0
+        } catch (e) { return false }
+      }
+
       // 审计写入串行化：读全文件+回写是非原子操作，并发操作（如审批门 + git 执行）
       // 同时写会互相覆盖丢行；用 promise 链排队，且失败不影响下一次写入。
       let auditChain = Promise.resolve()
@@ -461,21 +496,117 @@ export default function () {
         return null
       }
 
+      // ============ 仓库注册表（$DSH_HOME/git-panel/git-repos.json） ============
+      // 权威配置而非缓存：永不 TTL / LRU 逐出，扫描不触碰——仓库暂时消失（移动硬盘、
+      // 重命名、扫描截断）时设置保留，路径恢复后自动再生效。只记录用户显式设置过的
+      // 字段（当前仅 ruleScope）；无记录时按「规则文件是否存在」推断生效来源，与旧版
+      // 行为一致。version 为格式版本号，供未来结构迁移分支用（与 scan-cache.json 同约定）。
+      const repoRegistry = new Map() // normPathKey(repo.path) → { ruleScope?: 'global' | 'repo' }
+      let repoRegistryLoadPromise = null
+      let repoRegistryWriteChain = Promise.resolve()
+
+      async function repoRegistryFilePath() {
+        const home = await dshHome()
+        return home ? joinPath(home, 'git-panel', 'git-repos.json') : null
+      }
+
+      function loadRepoRegistry() {
+        if (repoRegistryLoadPromise) return repoRegistryLoadPromise
+        repoRegistryLoadPromise = (async () => {
+          const p = await repoRegistryFilePath()
+          if (!p) return
+          const raw = await fsReadText(p)
+          if (!raw) return
+          let data = null
+          try { data = JSON.parse(raw) } catch (e) { return }
+          const entries = data && data.repos && typeof data.repos === 'object' ? data.repos : {}
+          for (const key of Object.keys(entries)) {
+            const e = entries[key]
+            if (!e || typeof e !== 'object') continue
+            const rec = {}
+            if (e.ruleScope === 'global' || e.ruleScope === 'repo') rec.ruleScope = e.ruleScope
+            if (Object.keys(rec).length) repoRegistry.set(key, rec)
+          }
+        })().catch(() => {})
+        return repoRegistryLoadPromise
+      }
+
+      // 与 scan-cache / audit 同一理由：读全文件+回写非原子，写盘串行化
+      function scheduleRepoRegistrySave() {
+        repoRegistryWriteChain = repoRegistryWriteChain.then(async () => {
+          const p = await repoRegistryFilePath()
+          if (!p) return
+          const repos = {}
+          for (const [key, rec] of repoRegistry) repos[key] = rec
+          const okW = await writeTextAnywhere(p, JSON.stringify({ version: 1, repos }, null, 2) + '\n')
+          if (!okW) console.error('[git-panel] 仓库注册表写盘失败: ' + p)
+        }).catch(() => {})
+        return repoRegistryWriteChain
+      }
+
+      async function getRuleScopePref(repo) {
+        if (!repo || !repo.path) return null
+        await loadRepoRegistry()
+        const rec = repoRegistry.get(normPathKey(repo.path))
+        return rec && rec.ruleScope ? rec.ruleScope : null
+      }
+
+      async function setRuleScopePref(repo, scope) {
+        if (!repo || !repo.path) return
+        await loadRepoRegistry()
+        const key = normPathKey(repo.path)
+        const rec = repoRegistry.get(key) || {}
+        if (scope === 'global' || scope === 'repo') rec.ruleScope = scope
+        else delete rec.ruleScope
+        if (Object.keys(rec).length) repoRegistry.set(key, rec)
+        else repoRegistry.delete(key)
+        scheduleRepoRegistrySave()
+      }
+
       // ============ 规则读写（每次实时读盘，不缓存） ============
-      async function rulesFilePath(repoName, scope) {
+      // 仓库专属文件名 {name}-{pathHash8}.yaml：同名仓库（不同路径）各持一份，
+      // 也顺带避开保留名 default.yaml；无 path 的 repoName 兜底场景退回旧命名。
+      async function rulesFilePath(repo, scope) {
         const dir = await rulesDir()
-        const file = scope === 'repo' ? sanitizeName(repoName) + '.yaml' : 'default.yaml'
+        if (scope !== 'repo') return joinPath(dir, 'default.yaml')
+        const name = sanitizeName(repo && repo.name)
+        const file = repo && repo.path ? name + '-' + pathHash8(normPathKey(repo.path)) + '.yaml' : name + '.yaml'
         return joinPath(dir, file)
       }
 
-      async function loadEffectiveRules(repoName) {
-        const repoPath = await rulesFilePath(repoName, 'repo')
-        const repoTxt = await fsReadText(repoPath)
-        if (repoTxt !== null) {
-          const parsed = parseRulesYaml(repoTxt)
-          if (!validateRules(parsed)) return { source: 'repo', path: repoPath, system_prompt: parsed.system_prompt, user_context: parsed.user_context }
+      // 旧版仓库规则路径（纯名字命名，同名仓库互相覆盖——仅作读取回退，永不写入）
+      async function legacyRulesFilePath(repo) {
+        return joinPath(await rulesDir(), sanitizeName(repo && repo.name) + '.yaml')
+      }
+
+      // 读仓库专属规则原文：新哈希文件名优先，缺失时回退旧版文件（老数据无感迁移；
+      // 下次保存写入新路径后即自然脱离旧文件）。path 为实际读到的文件，newPath
+      // 为保存目标路径（供「保存到」提示与 rulesSetScope 创建文件使用）。
+      async function readRepoRules(repo) {
+        const newPath = await rulesFilePath(repo, 'repo')
+        let txt = await fsReadText(newPath)
+        let path = newPath
+        if (txt === null && repo && repo.path) {
+          const legacyPath = await legacyRulesFilePath(repo)
+          if (legacyPath !== newPath) {
+            const ltxt = await fsReadText(legacyPath)
+            if (ltxt !== null) { txt = ltxt; path = legacyPath }
+          }
         }
-        const defPath = await rulesFilePath(repoName, 'global')
+        return { txt, path, newPath }
+      }
+
+      // 生效来源：显式偏好（git-repos.json 的 ruleScope）优先于文件存在性推断——
+      // ruleScope='global' 时即使仓库文件存在也走全局（切回全局真正起效）；
+      // ruleScope='repo' 但文件缺失/非法时落回全局，不留死路。
+      async function loadEffectiveRules(repo) {
+        const pref = await getRuleScopePref(repo)
+        const rr = await readRepoRules(repo)
+        if (rr.txt !== null && pref !== 'global') {
+          const parsed = parseRulesYaml(rr.txt)
+          if (!validateRules(parsed)) return { source: 'repo', path: rr.path, system_prompt: parsed.system_prompt, user_context: parsed.user_context }
+        }
+        const defPath = await rulesFilePath(repo, 'global')
         const defTxt = await fsReadText(defPath)
         if (defTxt !== null) {
           const parsed = parseRulesYaml(defTxt)
@@ -488,7 +619,7 @@ export default function () {
       // 确保全局默认规则文件存在；仅当其内容仍是未经修改的内置版本（中或英）时，
       // 才随语言切换重写为当前语言版本——用户编辑过的文件绝不覆盖。
       async function ensureDefaultRules() {
-        const defPath = await rulesFilePath('default', 'global')
+        const defPath = await rulesFilePath(null, 'global')
         const cur = await fsReadText(defPath)
         const want = emitRulesYaml(builtinRules())
         const norm = (s) => String(s || '').replace(/\r\n/g, '\n').trim()
@@ -566,13 +697,8 @@ export default function () {
       const inflightRescans = new Set() // 后台重扫 single-flight（按 root key）
       let currentRootKey = null // 最近一次 scan RPC 激活的 root（后台重扫激活守卫）
 
-      // 缓存键规范化：盘符大小写与 '/' / '\\' 变体对齐，去尾部分隔符；
-      // POSIX 上反斜杠是合法文件名字符，仅对盘符开头的路径做斜杠归一
-      function rootCacheKey(root) {
-        let p = String(root || '').trim().replace(/[\\/]+$/, '')
-        if (/^[A-Za-z]:/.test(p)) p = p[0].toUpperCase() + p.slice(1).replace(/\//g, '\\')
-        return p
-      }
+      // 缓存键规范化与注册表键同一实现（见 normPathKey）
+      function rootCacheKey(root) { return normPathKey(root) }
 
       async function scanCacheFilePath() {
         const home = await dshHome()
@@ -873,7 +999,7 @@ export default function () {
       const genTasks = new Map()
 
       async function prepareGenerate(repo, files) {
-        const rules = await loadEffectiveRules(repo.name)
+        const rules = await loadEffectiveRules(repo)
         const status = await repoStatus(repo)
         if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
         const untrackedSet = new Set(status.untracked.map((f) => f.path))
@@ -1310,47 +1436,80 @@ export default function () {
       })
 
       registerRpc('rulesGet', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        const name = repo ? repo.name : (args && args.repoName) || 'default'
-        const defPath = await rulesFilePath(name, 'global')
-        const repoPath = await rulesFilePath(name, 'repo')
+        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
+        const defPath = await rulesFilePath(repo, 'global')
+        const rr = await readRepoRules(repo)
         const defYaml = (await fsReadText(defPath)) || emitRulesYaml(builtinRules())
-        const repoTxt = await fsReadText(repoPath)
-        const effective = await loadEffectiveRules(name)
-        return ok({ defaultYaml: defYaml, defaultPath: defPath, repoYaml: repoTxt, repoPath, repoRuleExists: repoTxt !== null, effective })
+        const effective = await loadEffectiveRules(repo)
+        const ruleScope = await getRuleScopePref(repo)
+        return ok({ defaultYaml: defYaml, defaultPath: defPath, repoYaml: rr.txt, repoPath: rr.newPath, repoRuleExists: rr.txt !== null, ruleScope, effective })
       })
 
       registerRpc('rulesSave', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        const name = repo ? repo.name : (args && args.repoName) || 'default'
+        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
         const scope = args && args.scope === 'repo' ? 'repo' : 'global'
         if (!args || typeof args.yaml !== 'string') return fail(tr('errNoYaml'))
         const parsed = parseRulesYaml(args.yaml)
         const err = validateRules(parsed)
         if (err) return fail(fmt(tr('errRules'), { e: err }))
-        const path = await rulesFilePath(name, scope)
+        const path = await rulesFilePath(repo, scope)
         const okW = await writeTextAnywhere(path, emitRulesYaml({ system_prompt: parsed.system_prompt, user_context: parsed.user_context }))
         if (!okW) return fail(fmt(tr('errRulesWrite'), { p: path }))
-        await audit({ op: 'rules-save', repo: name, scope, path })
+        // 保存仓库专属规则即视为选择该来源（与旧版「文件存在即生效」的语义一致）
+        if (scope === 'repo') await setRuleScopePref(repo, 'repo')
+        await audit({ op: 'rules-save', repo: repo.name, scope, path })
         return ok({ summary: fmt(tr('rulesSaved'), { p: path }) })
       })
 
       registerRpc('rulesReset', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        const name = repo ? repo.name : (args && args.repoName) || 'default'
+        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
         const scope = args && args.scope === 'repo' ? 'repo' : 'global'
-        const path = await rulesFilePath(name, scope)
+        if (scope === 'repo') {
+          // 重置仓库专属 = 删除仓库规则文件并显式回退全局（旧版是把内置默认写进
+          // 仓库文件，导致全局规则对该仓库永远无法生效）。旧版纯名字文件可能被
+          // 同名仓库共享，不动它——ruleScope='global' 已保证它不再被生效逻辑选中。
+          const path = await rulesFilePath(repo, 'repo')
+          await removeFileAnywhere(path)
+          await setRuleScopePref(repo, 'global')
+          await audit({ op: 'rules-reset', repo: repo.name, scope, path })
+          return ok({ summary: tr('rulesResetRepo') })
+        }
+        const path = await rulesFilePath(repo, 'global')
         const yaml = emitRulesYaml(builtinRules())
         const okW = await writeTextAnywhere(path, yaml)
         if (!okW) return fail(fmt(tr('errRulesWrite'), { p: path }))
-        await audit({ op: 'rules-reset', repo: name, scope, path })
+        await audit({ op: 'rules-reset', repo: repo.name, scope, path })
         return ok({ summary: tr('rulesReset'), yaml })
       })
 
-      registerRpc('rulesCopy', async (args) => {
+      // 切换当前仓库的生效规则来源。切到仓库专属时文件不存在则以当前生效规则为底
+      // 创建（继承全局内容，便于直接编辑）；切回全局只改偏好、保留仓库文件不删，
+      // 之后可随时再切回。
+      registerRpc('rulesSetScope', async (args) => {
         const repo = repoOf(args && args.repoId)
-        const name = repo ? repo.name : (args && args.repoName) || 'default'
-        const effective = await loadEffectiveRules(name)
+        if (!repo) return fail(tr('errRepoMissing'))
+        const scope = args && args.scope === 'repo' ? 'repo' : 'global'
+        if (scope === 'repo') {
+          const cur = await readRepoRules(repo)
+          if (cur.txt === null) {
+            const eff = await loadEffectiveRules(repo)
+            const okW = await writeTextAnywhere(cur.newPath, emitRulesYaml({ system_prompt: eff.system_prompt, user_context: eff.user_context }))
+            if (!okW) return fail(fmt(tr('errRulesWrite'), { p: cur.newPath }))
+          }
+        }
+        await setRuleScopePref(repo, scope)
+        await audit({ op: 'rules-scope', repo: repo.path, scope })
+        const rr = await readRepoRules(repo)
+        const effective = await loadEffectiveRules(repo)
+        return ok({
+          summary: tr(scope === 'repo' ? 'rulesScopeRepo' : 'rulesScopeGlobal'),
+          ruleScope: scope, repoYaml: rr.txt, repoPath: rr.newPath, repoRuleExists: rr.txt !== null, effective
+        })
+      })
+
+      registerRpc('rulesCopy', async (args) => {
+        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
+        const effective = await loadEffectiveRules(repo)
         const yaml = emitRulesYaml({ system_prompt: effective.system_prompt, user_context: effective.user_context })
         try {
           await spawnRaw(['cmd.exe', '/d', '/s', '/c', 'clip'], '.', { stdinData: yaml, timeoutMs: 15000 })

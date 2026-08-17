@@ -442,6 +442,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         zh: {
           groupStaged: '暂存的更改', groupChanges: '更改', groupUntracked: '未跟踪的更改', history: '历史',
           rulesLoadFailed: '读取规则失败', reading: '(读取中…)', saved: '已保存', saveFailed: '保存失败', saveFailedWith: '保存失败: {e}',
+          scopeSwitchFailed: '切换规则来源失败',
           validationNoSys: '校验失败: 缺少 system_prompt', validationNoUser: '校验失败: 缺少 user_context',
           restoredDefaults: '已恢复为内置默认内容（未保存）', globalRules: '全局规则', repoRules: '仓库专属规则', scopeSaveTo: '保存到: {p}', scopeNewFile: '（文件不存在，保存时创建）',
           rulesContent: '规则内容', sysPromptLabel: '系统提示词（必填）', userCtxLabel: '用户上下文（必填）',
@@ -490,6 +491,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         en: {
           groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', history: 'History',
           rulesLoadFailed: 'Failed to load rules', reading: '(loading…)', saved: 'Saved', saveFailed: 'Save failed', saveFailedWith: 'Save failed: {e}',
+          scopeSwitchFailed: 'Failed to switch rules source',
           validationNoSys: 'Validation failed: missing system_prompt', validationNoUser: 'Validation failed: missing user_context',
           restoredDefaults: 'Restored to built-in defaults (not saved)', globalRules: 'Global rules', repoRules: 'Repo-specific rules', scopeSaveTo: 'Saved to: {p}', scopeNewFile: ' (file does not exist, will be created on save)',
           rulesContent: 'Rule content', sysPromptLabel: 'system prompt (required)', userCtxLabel: 'user context (required)',
@@ -668,16 +670,18 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
       }
 
       function RuleEditorModal({ repo, onClose }) {
-        // 双缓冲：全局 / 仓库各一套编辑内容，切换 scope 不丢失未保存的修改
+        // 双缓冲：全局 / 仓库各一套编辑内容；scope 单选即生效来源（切换走 rulesSetScope，
+        // 切到仓库时缓冲区以 Host 返回的仓库文件内容为准）
         const [buffers, setBuffers] = React.useState({ global: { sysPrompt: '', userCtx: '' }, repo: { sysPrompt: '', userCtx: '' } })
         const [defaults, setDefaults] = React.useState({ sysPrompt: '', userCtx: '' })
         const [paths, setPaths] = React.useState({ global: '', repo: '' })
         const [repoExists, setRepoExists] = React.useState(false)
-        // scope 初始为 null：等 rulesGet 返回后跟随当前生效来源（有仓库专属规则则落在 repo），
-        // 加载完成前 scope 切换禁用，避免先闪 global 再跳 repo
+        // scope 初始为 null：等 rulesGet 返回后跟随当前生效来源（ruleScope 偏好 +
+        // 仓库文件存在性，见 Host loadEffectiveRules），加载完成前切换禁用，避免闪跳
         const [scope, setScope] = React.useState(null)
         const [loaded, setLoaded] = React.useState(false)
         const [saving, setSaving] = React.useState(false)
+        const [switching, setSwitching] = React.useState(false)
         const [branch, setBranch] = React.useState(tr('reading'))
 
         React.useEffect(() => {
@@ -692,7 +696,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
               setDefaults({ sysPrompt: g.system_prompt || '', userCtx: g.user_context || '' })
               setPaths({ global: r.defaultPath || '', repo: r.repoPath || '' })
               setRepoExists(!!r.repoRuleExists)
-              setScope(r.repoRuleExists ? 'repo' : 'global')
+              setScope(r.effective && r.effective.source === 'repo' ? 'repo' : 'global')
               setLoaded(true)
             } else pushToast('error', (r && r.error) || tr('rulesLoadFailed'))
           }).catch((e) => pushToast('error', tr('rulesLoadFailed') + ': ' + (e && e.message ? e.message : String(e))))
@@ -726,6 +730,28 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
           pushToast('info', tr('restoredDefaults'))
         }
 
+        // scope 单选 = 真实切换生效来源（rulesSetScope 写入 git-repos.json 偏好）：
+        // 切到仓库专属时 Host 会以当前生效规则为底创建文件（若不存在）；
+        // 切回全局保留仓库文件，之后可再切回。保存仍是显式动作（onSave）。
+        const onScopeChange = async (next) => {
+          if (next === curScope || switching || !loaded) return
+          setSwitching(true)
+          try {
+            const r = await callRpc('rulesSetScope', { repoId: repo.id, scope: next })
+            if (r && r.ok) {
+              if (next === 'repo' && typeof r.repoYaml === 'string') {
+                const rp = parseRulesYaml(r.repoYaml)
+                setBuffers((b) => ({ ...b, repo: { sysPrompt: rp.system_prompt || '', userCtx: rp.user_context || '' } }))
+              }
+              if (r.repoPath) setPaths((p) => ({ ...p, repo: r.repoPath }))
+              setRepoExists(!!r.repoRuleExists)
+              setScope(next)
+              pushToast('success', r.summary || tr('saved'))
+            } else pushToast('error', (r && r.error) || tr('scopeSwitchFailed'))
+          } catch (e) { pushToast('error', tr('scopeSwitchFailed') + ': ' + (e && e.message ? e.message : String(e))) }
+          finally { setSwitching(false) }
+        }
+
         const fieldEditor = (keyName, label, value, setValue) =>
           React.createElement('div', { className: 'gp-rule-field' },
             React.createElement('div', { className: 'gp-rule-field-head' },
@@ -736,11 +762,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
         const body = React.createElement('div', { className: 'gp-modal-body' },
           React.createElement('div', { className: 'gp-rule-scope' },
             React.createElement('label', { title: tr('globalRules') },
-              React.createElement('input', { type: 'radio', name: 'gp-rule-scope', disabled: !loaded, checked: curScope === 'global', onChange: () => setScope('global') }),
+              React.createElement('input', { type: 'radio', name: 'gp-rule-scope', disabled: !loaded || switching, checked: curScope === 'global', onChange: () => onScopeChange('global') }),
               React.createElement('span', null, tr('globalRules'))),
             React.createElement('label', { title: tr('repoRules') },
-              React.createElement('input', { type: 'radio', name: 'gp-rule-scope', disabled: !loaded, checked: curScope === 'repo', onChange: () => setScope('repo') }),
-              React.createElement('span', null, tr('repoRules')))),
+              React.createElement('input', { type: 'radio', name: 'gp-rule-scope', disabled: !loaded || switching, checked: curScope === 'repo', onChange: () => onScopeChange('repo') }),
+              React.createElement('span', null, tr('repoRules'))),
+            switching ? React.createElement('span', { className: 'gp-spinner' }) : null),
           React.createElement('div', { className: 'gp-rule-scope-hint', title: paths[curScope] },
             fmt(tr('scopeSaveTo'), { p: paths[curScope] || tr('loading') }),
             curScope === 'repo' && !repoExists ? tr('scopeNewFile') : null),

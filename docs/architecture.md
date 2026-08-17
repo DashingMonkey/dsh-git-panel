@@ -29,7 +29,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `src/host.js` | Host 半体：git 执行层（参数 100% 数组化、批量 pathspec 走 stdin）、BFS 仓库发现 + 两级扫描缓存（内存 + `$DSH_HOME/git-panel/scan-cache.json`）、提交规则读写、审计日志、LLM 生成、面向 Client 的 JSON RPC |
+| `src/host.js` | Host 半体：git 执行层（参数 100% 数组化、批量 pathspec 走 stdin）、BFS 仓库发现 + 两级扫描缓存（内存 + `$DSH_HOME/git-panel/scan-cache.json`）、提交规则读写 + 每仓库生效来源偏好注册表（`git-repos.json`，权威配置非缓存）、审计日志、LLM 生成、面向 Client 的 JSON RPC |
 | `src/client.js` | Client 半体：面板全部 UI（`React.createElement`，无 JSX），Slot 注入 + 样式 + zh/en 文案 |
 | `src/index.js` | 文件形态 Host 入口（re-export `src/host.js` 默认导出；`./client` 子路径导出 Client 半体） |
 | `scripts/build.mjs` | 构建：生成 `lib/index.js`（对象形态 host 入口 + inject）、`lib/client.js`（ModuleLoader bundle） |
