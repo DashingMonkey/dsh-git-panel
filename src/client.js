@@ -16,8 +16,9 @@
  *     图谱按 lane 循环配色、合并线为圆角肘形曲线，提交详情改为行悬停浮层（VS Code hover 风格）；
  *   - 点击文件从面板左缘滑出浮层 diff 抽屉（覆盖在聊天区上方，文件列表保持可见可
  *     直接切换文件）：双列行号、整行柔和红绿底色、sticky 分段头、+增/−删 统计徽标、
- *     自动换行开关；左右分栏（split）模式：左源文件/右修改后，配对修改行带 word 级
- *     中段高亮（公共前后缀裁剪），分栏下强制自动换行，模式记忆在 localStorage（gp-diff-split）；抽屉左缘可拖拽调宽（记忆在 localStorage），Esc / 点遮罩关闭；
+ *     恒定自动换行（单栏/分栏一致，GitHub 式，无横向滚动）；左右分栏（split）模式：
+ *     左源文件/右修改后，配对修改行带 word 级中段高亮（公共前后缀裁剪），模式记忆在
+ *     localStorage（gp-diff-split）；抽屉左缘可拖拽调宽（记忆在 localStorage），Esc / 点遮罩关闭；
  *     开/关抽屉均为滑入/滑出动效（transition + 双 rAF 入场，避免首帧闪现完整面板）；
  *     被点击的文件行保持 VS Code 式选中盒（1px 品牌色边框 + 浅品牌底），再次点击同一行 = 取消选中并关闭抽屉；
  *   - 文件行支持 VS Code 式多选：Ctrl/⌘+点击增删、Shift+点击按可见顺序范围选择（按仓库隔离，
@@ -110,6 +111,13 @@ export default function () {
    调整观感只需改这两处取值。 */
 :root { --gp-border-1: rgba(0, 0, 0, .12); --gp-border-2: rgba(0, 0, 0, .20); }
 body[data-ds-dark-theme] { --gp-border-1: rgba(255, 255, 255, .15); --gp-border-2: rgba(255, 255, 255, .26); }
+/* ===== 弹层底色 =====
+   宿主 --dsw-alias-bg-overlay 在深色模式下偏浅，浮在深色内容上发灰。弹层统一走
+   --gp-pop-bg（覆盖 .gp-menu / .gp-cd-pop / .gp-toast）：亮色原样跟随主题，
+   深色用 color-mix 向黑压（宿主深色 token 实测 ≈ #61656A，偏浅），色调仍随主题。
+   观感深浅改下方取值即可。 */
+:root { --gp-pop-bg: var(--dsw-alias-bg-overlay); }
+body[data-ds-dark-theme] { --gp-pop-bg: color-mix(in srgb, var(--dsw-alias-bg-overlay) 40%, #000); }
 .gp-panel, .gp-panel * { box-sizing: border-box; }
 /* UI 控件禁用文本选择（双击/拖动扩选在列表行上很丑，对齐 VS Code 列表行为）：
    面板 / diff 抽屉 / 弹窗 / 通知整体 none；例外恢复 text —— diff 代码区（复制代码）、
@@ -169,7 +177,7 @@ body[data-ds-dark-theme] .gp-btn-primary { color: #16181d; text-shadow: none; }
 .gp-count-untracked { color: var(--dsw-alias-brand-primary); }
 .gp-spacer { flex: 1; }
 .gp-menu-wrap { position: relative; }
-.gp-menu { position: absolute; right: 0; top: calc(100% + 4px); background: var(--dsw-alias-bg-overlay); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 120; min-width: 250px; padding: 4px; }
+.gp-menu { position: absolute; right: 0; top: calc(100% + 4px); background: var(--gp-pop-bg); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 120; min-width: 250px; padding: 4px; }
 .gp-menu-backdrop { position: fixed; inset: 0; z-index: 110; background: transparent; }
 .gp-menu-item { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; background: none; border: none; color: var(--dsw-alias-label-primary); padding: 7px 10px; border-radius: 5px; font-size: 13px; cursor: pointer; }
 .gp-menu-item:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
@@ -244,7 +252,7 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-grow-meta { font-size: 11.5px; color: var(--dsw-alias-label-secondary); white-space: nowrap; flex: 0 0 auto; }
 .gp-grow-more { position: absolute; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 /* ===== 提交详情悬浮卡（VSCode 风格）：分段卡片，段间细线分隔 ===== */
-.gp-cd-pop { position: fixed; z-index: 320; width: 480px; max-width: 86vw; max-height: 50vh; overflow-y: auto; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: 13px; color: var(--dsw-alias-label-primary); pointer-events: auto; }
+.gp-cd-pop { position: fixed; z-index: 320; width: 480px; max-width: 86vw; max-height: 50vh; overflow-y: auto; background: var(--gp-pop-bg); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: 13px; color: var(--dsw-alias-label-primary); pointer-events: auto; }
 .gp-cd-sec { padding: 8px 12px; }
 /* 段间细线分隔；作者行与 message 之间不划线、只留空白间隔 */
 .gp-cd-sec + .gp-cd-sec { border-top: 1px solid var(--gp-border-1); }
@@ -302,9 +310,8 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 .gp-diff-stat-del { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
 .gp-btn-icon.gp-on { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
 .gp-diff-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
-/* 表格容器：min-width 100% 保证行底色铺满视口宽，width max-content 让长行撑出横向滚动 */
-.gp-diff-table { min-width: 100%; width: max-content; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.55; padding-bottom: 10px; }
-.gp-diff-table.gp-dt-wrap { width: 100%; }
+/* 表格容器：单栏/分栏均恒定自动换行（无横向滚动），width 100% 让行底色铺满视口宽 */
+.gp-diff-table { width: 100%; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.55; padding-bottom: 10px; }
 .gp-diff-meta { padding: 7px 12px; color: var(--dsw-alias-label-tertiary); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; border-bottom: 1px dashed var(--gp-border-1); }
 /* @@ 分段头：sticky 吸附在滚动容器顶，实底色盖住滚过的内容 */
 .gp-diff-hrow { position: sticky; top: 0; z-index: 2; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-brand-primary); font-size: 12px; padding: 3px 12px; border-top: 1px solid var(--gp-border-1); border-bottom: 1px solid var(--gp-border-1); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
@@ -317,8 +324,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 .gp-diff-ln { flex: 0 0 46px; padding: 0 7px; text-align: right; color: var(--dsw-alias-label-tertiary); user-select: none; border-right: 1px solid var(--gp-border-1); font-size: 11.5px; }
 .gp-dr-add .gp-diff-ln { background: rgba(46,160,67,.10); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); }
 .gp-dr-del .gp-diff-ln { background: rgba(248,81,73,.08); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent); }
-.gp-diff-code { flex: 1; min-width: 0; white-space: pre; padding: 0 12px 0 0; tab-size: 4; }
-.gp-dt-wrap .gp-diff-code { white-space: pre-wrap; word-break: break-all; }
+.gp-diff-code { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-all; padding: 0 12px 0 0; tab-size: 4; }
 .gp-diff-sign { display: inline-block; width: 2ch; text-align: center; user-select: none; }
 .gp-dr-add .gp-diff-sign { color: var(--dsw-alias-state-success-primary); font-weight: 700; }
 .gp-dr-del .gp-diff-sign { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
@@ -356,7 +362,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 .gp-rule-preview-title { font-weight: 700; color: var(--dsw-alias-brand-primary); margin: 8px 0 4px; }
 .gp-rule-preview-title:first-child { margin-top: 0; }
 .gp-toast-stack { position: fixed; right: 14px; bottom: 14px; z-index: 500; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-.gp-toast { pointer-events: auto; padding: 10px 14px; border-radius: 7px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--gp-border-2); border-left: 3px solid var(--dsw-alias-brand-primary); box-shadow: 0 8px 24px rgba(0,0,0,.3); font-size: 13.5px; max-width: 420px; word-break: break-word; color: var(--dsw-alias-label-primary); animation: gp-toast-in .18s ease-out; }
+.gp-toast { pointer-events: auto; padding: 10px 14px; border-radius: 7px; background: var(--gp-pop-bg); border: 1px solid var(--gp-border-2); border-left: 3px solid var(--dsw-alias-brand-primary); box-shadow: 0 8px 24px rgba(0,0,0,.3); font-size: 13.5px; max-width: 420px; word-break: break-word; color: var(--dsw-alias-label-primary); animation: gp-toast-in .18s ease-out; }
 .gp-toast.gp-toast-exit { animation: gp-toast-out .24s ease-in forwards; }
 @keyframes gp-toast-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes gp-toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(28px); } }
@@ -399,8 +405,6 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
         chevronDown: { p: ['M3.5 6L8 10.5 12.5 6'] },
         close: { p: ['M4.2 4.2l7.6 7.6', 'M11.8 4.2l-7.6 7.6'] },
         back: { p: ['M10 3.2L5.2 8 10 12.8'] },
-        // 自动换行（↩ 形回旋箭头：两行文本 + 第二行末尾折返箭头）
-        wrap: { p: ['M2.5 4h11', 'M2.5 8h6.5a2.5 2.5 0 0 1 0 5H7.6', 'M9.2 10.7L7 13l2.2 2.3'] },
         check: { p: ['M2.8 8.7l3.4 3.4L13.2 4.8'] },
         // VS Code codicon「refresh」官方路径（填充字形，环形箭头）
         // 来源：https://github.com/microsoft/vscode-codicons/blob/main/src/icons/refresh.svg
@@ -509,8 +513,8 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           stagedDiffPlaceholder: '<点击「生成」时实时注入的 staged diff>', restoreDefaults: '恢复默认', cancel: '取消',
           saving: '保存中…', save: '保存', ruleEditorTitle: '提交规则编辑器', close: '关闭',
           loadFailed: '读取失败', backToChanges: '返回变更列表', back: '返回', loadingDiff: '加载 diff…',
-          toggleWrap: '切换自动换行', closeDiff: '关闭 diff（Esc）',
-          splitDiffTitle: '分栏对比（左：源文件 / 右：修改后）', unifiedDiffTitle: '恢复单栏对比',
+          closeDiff: '关闭 diff（Esc）',
+          splitDiffTitle: '分栏对比', unifiedDiffTitle: '单栏对比',
           historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
           stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', generated: '已生成提交信息（规则来源：{s}）',
           ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}', genTimeout: '生成超时，请重试',
@@ -548,7 +552,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           rescan: '重新扫描（并刷新所有仓库状态）', openFolder: '在文件资源管理器中打开工作空间', openFolderFailed: '打开文件夹失败: {e}', openFolderUnavailable: '文件管理器服务不可用',
           locating: '正在定位工作空间…', scanning: '正在扫描 Git 仓库…', scanFailed: '扫描失败',
           noWorkspace: '未打开工作空间', noRepos: '当前工作空间内未发现 Git 仓库。', resizeTitle: '拖拽调整面板宽度',
-          toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel（类 VS Code Source Control）',
+          toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel',
           expandTitle: '展开 Git Panel'
         },
         en: {
@@ -563,8 +567,8 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           stagedDiffPlaceholder: '<staged diff injected live when you click Generate>', restoreDefaults: 'Restore Defaults', cancel: 'Cancel',
           saving: 'Saving…', save: 'Save', ruleEditorTitle: 'Commit Rule Editor', close: 'Close',
           loadFailed: 'Failed to load', backToChanges: 'Back to changes', back: 'Back', loadingDiff: 'Loading diff…',
-          toggleWrap: 'Toggle word wrap', closeDiff: 'Close diff (Esc)',
-          splitDiffTitle: 'Split view (left: original / right: modified)', unifiedDiffTitle: 'Switch back to unified view',
+          closeDiff: 'Close diff (Esc)',
+          splitDiffTitle: 'Split view', unifiedDiffTitle: 'Unified view',
           historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
           stageFirst: 'Stage files first using the + on the right of each file', generated: 'Commit message generated (rules: {s})',
           ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}', genTimeout: 'Generation timed out, please retry',
@@ -602,7 +606,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           rescan: 'Rescan (also refreshes all repository statuses)', openFolder: 'Open workspace in file explorer', openFolderFailed: 'Failed to open folder: {e}', openFolderUnavailable: 'File manager service unavailable',
           locating: 'Locating workspace…', scanning: 'Scanning for Git repositories…', scanFailed: 'Scan failed',
           noWorkspace: 'No workspace open', noRepos: 'No Git repositories found in the current workspace.', resizeTitle: 'Drag to resize the panel width',
-          toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel (VS Code Source Control style)',
+          toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel',
           expandTitle: 'Expand Git Panel'
         }
       }
@@ -931,12 +935,10 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
       //     本组件播完滑出动效（240ms）后回调 onClose 真正卸载；期间切到新文件会取消卸载；
       //   - 左缘拖拽调宽，宽度记忆在 localStorage（gp-diff-w）；
       //   - 左右分栏（split）视图：左源文件/右修改后，配对修改行带 word 级中段高亮
-      //     （公共前后缀裁剪），分栏下强制自动换行，模式记忆在 localStorage（gp-diff-split）。
+      //     （公共前后缀裁剪），模式记忆在 localStorage（gp-diff-split）。
       function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose }) {
         const [state, setState] = React.useState({ loading: true, text: '', error: '' })
-        const [wrap, setWrap] = React.useState(false)
-        // 分栏（split）视图：左源文件/右修改后；记忆在 localStorage。分栏下强制
-        // 自动换行（每半栏仅 ~1/2 抽屉宽，横向滚动不可用），wrap 按钮仅单栏时显示
+        // 分栏（split）视图：左源文件/右修改后；记忆在 localStorage
         const [split, setSplit] = React.useState(() => loadSplit())
         const [drawerW, setDrawerW] = React.useState(() => loadDiffW() || Math.min(760, Math.max(440, Math.round(window.innerWidth * 0.42))))
         const [resizing, setResizing] = React.useState(false)
@@ -1051,7 +1053,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
         }
 
         // 头部布局：glyph | 标题框（flex:1 吃掉全部剩余空间）| +增/−删统计 | 组徽标 |
-        // 分栏切换 | 换行（仅单栏）| 关闭。不设 spacer —— 标题框的 flex-grow 已把右侧
+        // 分栏切换 | 关闭。不设 spacer —— 标题框的 flex-grow 已把右侧
         // 元素整体推到最右（统计居右），若再放 flex:1 的 spacer 会与标题框平分剩余空间。
         const head = React.createElement('div', { className: 'gp-diff-head' },
           React.createElement('span', { className: 'gp-diff-glyph ' + gl.cls }, gl.g),
@@ -1062,18 +1064,15 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
             parsed.adds > 0 ? React.createElement('span', { className: 'gp-diff-stat-add' }, '+' + parsed.adds) : null,
             parsed.dels > 0 ? React.createElement('span', { className: 'gp-diff-stat-del' }, '−' + parsed.dels) : null) : null,
           React.createElement('span', { className: 'gp-chip' }, GROUP_META[sel.group] ? tr(GROUP_META[sel.group].titleKey) : sel.group),
-          React.createElement('button', { className: 'gp-btn-icon' + (split ? ' gp-on' : ''), title: split ? tr('unifiedDiffTitle') : tr('splitDiffTitle'), onClick: () => setSplit((v) => { saveSplit(!v); return !v }) }, icon(split ? 'unified' : 'split')),
-          !split ? React.createElement('button', { className: 'gp-btn-icon' + (wrap ? ' gp-on' : ''), title: tr('toggleWrap'), onClick: () => setWrap((w) => !w) }, icon('wrap')) : null,
+          React.createElement('button', { className: 'gp-btn-icon', title: split ? tr('unifiedDiffTitle') : tr('splitDiffTitle'), onClick: () => setSplit((v) => { saveSplit(!v); return !v }) }, icon(split ? 'unified' : 'split')),
           React.createElement('button', { className: 'gp-btn-icon', title: tr('closeDiff'), onClick: requestClose }, icon('close')))
 
-        // 分栏下强制换行（wrapEff）：每半栏仅 ~1/2 抽屉宽，横向滚动不可用
-        const wrapEff = wrap || split
         const body = React.createElement('div', { className: 'gp-diff-body' },
           state.loading
             ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), ' ' + tr('loadingDiff'))
             : state.error
               ? React.createElement('div', { className: 'gp-empty' }, state.error)
-              : React.createElement('div', { className: 'gp-diff-table' + (wrapEff ? ' gp-dt-wrap' : '') },
+              : React.createElement('div', { className: 'gp-diff-table' },
                   parsed.meta.length ? React.createElement('div', { className: 'gp-diff-meta' }, parsed.meta.join('\n')) : null,
                   split
                     ? splitPairs.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
