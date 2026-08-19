@@ -14,11 +14,17 @@
  *   - 提交区位于仓库卡片顶部（message 输入框在上，变更列表在下）；
  *   - 历史区加大：行高 26 / 字号 13 / 高度 470，节点更大更清晰；
  *     图谱按 lane 循环配色、合并线为圆角肘形曲线，提交详情改为行悬停浮层（VS Code hover 风格）；
+ *     点击行内展开该提交的变更文件列表（VSCode 风格，手风琴式单开）：虚拟滚动改为
+ *     可变行高（前缀和 + 二分定位），展开行 SVG 拉高使 lane 竖线贯穿不断线，文件列表
+ *     懒加载 + 缓存（超 8 个转内部滚动）；点击文件复用 diff 抽屉查看提交内该文件差异；
  *   - 点击文件从面板左缘滑出浮层 diff 抽屉（覆盖在聊天区上方，文件列表保持可见可
  *     直接切换文件）：双列行号、整行柔和红绿底色、sticky 分段头、+增/−删 统计徽标、
  *     恒定自动换行（单栏/分栏一致，GitHub 式，无横向滚动）；左右分栏（split）模式：
  *     左源文件/右修改后，配对修改行带 word 级中段高亮（公共前后缀裁剪），模式记忆在
- *     localStorage（gp-diff-split）；抽屉左缘可拖拽调宽（记忆在 localStorage），Esc / 点遮罩关闭；
+ *     localStorage（gp-diff-split）；全文（full）模式：-U1000000 超大上下文展示整个
+ *     文件（改动行照常高亮、其余作上下文），记忆在 localStorage（gp-diff-full）；
+ *     滚动条内侧 overview ruler 细条：红/绿色块按文档比例标出增删位置（悬停加宽、
+ *     点击跳转居中）；抽屉左缘可拖拽调宽（记忆在 localStorage），Esc / 点遮罩关闭；
  *     开/关抽屉均为滑入/滑出动效（transition + 双 rAF 入场，避免首帧闪现完整面板）；
  *     被点击的文件行保持 VS Code 式选中盒（1px 品牌色边框 + 浅品牌底），再次点击同一行 = 取消选中并关闭抽屉；
  *   - 文件行支持 VS Code 式多选：Ctrl/⌘+点击增删、Shift+点击按可见顺序范围选择（按仓库隔离，
@@ -251,6 +257,23 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-grow-ref-tag { color: #d7a648; border-color: rgba(215, 166, 72, .5); }
 .gp-grow-meta { font-size: 11.5px; color: var(--dsw-alias-label-secondary); white-space: nowrap; flex: 0 0 auto; }
 .gp-grow-more { position: absolute; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+/* ===== 历史行内展开：展开行的内容列（顶栏 + 文件列表） ===== */
+.gp-grow-col { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; flex-direction: column; }
+.gp-grow-bar { display: flex; align-items: center; gap: 6px; height: 26px; flex: 0 0 auto; min-width: 0; }
+.gp-grow-files { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 4px 6px 2px; display: flex; flex-direction: column; }
+.gp-grow-files-note { display: flex; align-items: center; gap: 6px; margin: auto 0; padding: 4px 6px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+/* 展开区文件行：状态徽标（复用 gp-diff-glyph 配色）+ 名称/目录 + 增删统计 */
+.gp-gfile { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 2px; border-radius: 4px; cursor: pointer; min-width: 0; }
+.gp-gfile:hover { background: var(--dsw-alias-bg-layer-2); }
+/* 与变更树文件行同款选中盒：当前 diff 抽屉打开的正是该提交文件时 */
+.gp-gfile.gp-gfile-active { background: var(--dsw-alias-interactive-bg-hover); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
+.gp-gfile .gp-diff-glyph { width: 18px; height: 18px; font-size: 10px; }
+.gp-gfile-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.gp-gfile-dir { font-size: 11px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.gp-gfile-orig { font-size: 11px; color: var(--dsw-alias-label-tertiary); flex: 0 0 auto; }
+.gp-gfile-stats { display: inline-flex; gap: 6px; flex: 0 0 auto; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
+.gp-gf-add { color: var(--dsw-alias-state-success-primary); font-weight: 600; }
+.gp-gf-del { color: var(--dsw-alias-state-error-primary); font-weight: 600; }
 /* ===== 提交详情悬浮卡（VSCode 风格）：分段卡片，段间细线分隔 ===== */
 .gp-cd-pop { position: fixed; z-index: 320; width: 480px; max-width: 86vw; max-height: 50vh; overflow-y: auto; background: var(--gp-pop-bg); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: 13px; color: var(--dsw-alias-label-primary); pointer-events: auto; }
 .gp-cd-sec { padding: 8px 12px; }
@@ -309,7 +332,16 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 .gp-diff-stat-add { color: var(--dsw-alias-state-success-primary); font-weight: 700; }
 .gp-diff-stat-del { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
 .gp-btn-icon.gp-on { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
-.gp-diff-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
+.gp-diff-body-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+.gp-diff-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; position: relative; }
+/* ===== diff 滚动条 overview ruler（VS Code 风格）：滚动条内侧细条，
+   红/绿色块按「行位置 ÷ 内容总高」比例标出增删行位置（比例天然与滚动同步）；
+   悬停加宽便于点击，点击跳转到对应位置；色块最小 2px 保证可见 ===== */
+.gp-diff-ruler { position: absolute; top: 2px; bottom: 2px; width: 4px; border-radius: 2px; z-index: 3; cursor: pointer; transition: width .12s ease; }
+.gp-diff-ruler:hover { width: 9px; }
+.gp-diff-ruler-mark { position: absolute; left: 0; right: 0; min-height: 2px; border-radius: 1px; opacity: .9; }
+.gp-drm-add { background: var(--dsw-alias-state-success-primary); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 85%, transparent); }
+.gp-drm-del { background: var(--dsw-alias-state-error-primary); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 85%, transparent); }
 /* 表格容器：单栏/分栏均恒定自动换行（无横向滚动），width 100% 让行底色铺满视口宽 */
 .gp-diff-table { width: 100%; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.55; padding-bottom: 10px; }
 .gp-diff-meta { padding: 7px 12px; color: var(--dsw-alias-label-tertiary); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; border-bottom: 1px dashed var(--gp-border-1); }
@@ -428,7 +460,9 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
         discard: { f: ['M3.00098 2.5C3.00098 2.22386 3.22483 2 3.50098 2C3.77712 2 4.00098 2.22386 4.00098 2.5V6.34262L7.17202 3.17157C8.73412 1.60948 11.2668 1.60948 12.8289 3.17157C14.391 4.73367 14.391 7.26633 12.8289 8.82843L7.80375 13.8536C7.60849 14.0488 7.2919 14.0488 7.09664 13.8536C6.90138 13.6583 6.90138 13.3417 7.09664 13.1464L12.1218 8.12132C13.2933 6.94975 13.2933 5.05025 12.1218 3.87868C10.9502 2.70711 9.0507 2.70711 7.87913 3.87868L4.75781 7H8.50098C8.77712 7 9.00098 7.22386 9.00098 7.5C9.00098 7.77614 8.77712 8 8.50098 8H3.60098C3.26961 8 3.00098 7.73137 3.00098 7.4V2.5Z'] },
         // 分栏 diff（外框 + 中缝竖线）与单栏 diff（单个窄栏）：点击在两种视图间切换
         split: { p: ['M2.5 3.5h11v9h-11z', 'M8 3.5v9'] },
-        unified: { p: ['M2.5 3.5h11v9h-11z', 'M4.7 6.2h6.6', 'M4.7 9h6.6'] }
+        unified: { p: ['M2.5 3.5h11v9h-11z', 'M4.7 6.2h6.6', 'M4.7 9h6.6'] },
+        // 全文视图（文档外框 + 满页文本行）：diff 抽屉头部「显示全文 / 仅显示变更」切换
+        fullDoc: { p: ['M3.5 2.5h9v11h-9z', 'M5.7 5.2h4.6', 'M5.7 8h4.6', 'M5.7 10.8h4.6'] }
       }
       function Icon(props) {
         const spec = ICONS[props.name] || { p: [] }
@@ -478,6 +512,12 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
       function saveSplit(v) {
         try { window.localStorage.setItem('gp-diff-split', v ? '1' : '0') } catch (e) { /* ignore */ }
       }
+      function loadFull() {
+        try { return window.localStorage.getItem('gp-diff-full') === '1' } catch (e) { return false }
+      }
+      function saveFull(v) {
+        try { window.localStorage.setItem('gp-diff-full', v ? '1' : '0') } catch (e) { /* ignore */ }
+      }
       function loadCollapsed() {
         try { return window.localStorage.getItem('gp-collapsed') === '1' } catch (e) { return false }
       }
@@ -515,7 +555,9 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           loadFailed: '读取失败', backToChanges: '返回变更列表', back: '返回', loadingDiff: '加载 diff…',
           closeDiff: '关闭 diff（Esc）',
           splitDiffTitle: '分栏对比', unifiedDiffTitle: '单栏对比',
+          diffFullFile: '显示完整文件（含未变更行）', diffChangesOnly: '仅显示变更行',
           historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
+          loadingFiles: '加载文件…', commitNoFiles: '该提交无文件变更（合并提交无合并差异）',
           stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', generated: '已生成提交信息（规则来源：{s}）',
           ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}', genTimeout: '生成超时，请重试',
           commitFailed: '提交失败: {e}', editRules: '编辑提交规则',
@@ -569,7 +611,9 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           loadFailed: 'Failed to load', backToChanges: 'Back to changes', back: 'Back', loadingDiff: 'Loading diff…',
           closeDiff: 'Close diff (Esc)',
           splitDiffTitle: 'Split view', unifiedDiffTitle: 'Unified view',
+          diffFullFile: 'Show full file (including unchanged lines)', diffChangesOnly: 'Show changed lines only',
           historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
+          loadingFiles: 'Loading files…', commitNoFiles: 'No file changes in this commit (merge without combined diff)',
           stageFirst: 'Stage files first using the + on the right of each file', generated: 'Commit message generated (rules: {s})',
           ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}', genTimeout: 'Generation timed out, please retry',
           commitFailed: 'Commit failed: {e}', editRules: 'Edit commit rules',
@@ -935,11 +979,20 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
       //     本组件播完滑出动效（240ms）后回调 onClose 真正卸载；期间切到新文件会取消卸载；
       //   - 左缘拖拽调宽，宽度记忆在 localStorage（gp-diff-w）；
       //   - 左右分栏（split）视图：左源文件/右修改后，配对修改行带 word 级中段高亮
-      //     （公共前后缀裁剪），模式记忆在 localStorage（gp-diff-split）。
+      //     （公共前后缀裁剪），模式记忆在 localStorage（gp-diff-split）；
+      //   - 全文（full）视图：host 侧 git diff -U1000000 让整个文件进单个 hunk，
+      //     改动行照常红绿高亮、其余行作上下文灰显，超过 1MB 截断附提示行；
+      //     模式记忆在 localStorage（gp-diff-full），与 split 可叠加；
+      //   - 滚动条 overview ruler（VS Code 风格）：滚动条内侧细覆盖条，红/绿色块按
+      //     「行位置 ÷ 内容总高」比例标出增删位置（渲染后实测 DOM 行位置，与滚动天然
+      //     同步；分栏修改对拆上半红/下半绿），悬停加宽、点击按比例跳转居中。
       function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose }) {
         const [state, setState] = React.useState({ loading: true, text: '', error: '' })
         // 分栏（split）视图：左源文件/右修改后；记忆在 localStorage
         const [split, setSplit] = React.useState(() => loadSplit())
+        // 全文（full）视图：-U1000000 超大上下文让整个文件进单个 hunk，
+        // 改动行照常红绿高亮、其余行作上下文灰显；记忆在 localStorage
+        const [full, setFull] = React.useState(() => loadFull())
         const [drawerW, setDrawerW] = React.useState(() => loadDiffW() || Math.min(760, Math.max(440, Math.round(window.innerWidth * 0.42))))
         const [resizing, setResizing] = React.useState(false)
         // 滑入/滑出相位：off（未入场 / sel.closing）时整屉平移到面板正后方且全透明
@@ -972,13 +1025,74 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
         React.useEffect(() => {
           let alive = true
           setState({ loading: true, text: '', error: '' })
-          callRpc('fileDiff', { repoId: repo.id, path: sel.path, group: sel.group }).then((r) => {
+          callRpc('fileDiff', { repoId: repo.id, path: sel.path, group: sel.group, hash: sel.hash || undefined, full: full || undefined }).then((r) => {
             if (!alive) return
             if (r && r.ok) setState({ loading: false, text: r.text || '', error: '' })
             else setState({ loading: false, text: '', error: (r && r.error) || tr('loadFailed') })
           }).catch((e) => { if (alive) setState({ loading: false, text: '', error: e && e.message ? e.message : String(e) }) })
           return () => { alive = false }
-        }, [repo.id, sel.path, sel.group])
+        }, [repo.id, sel.path, sel.group, sel.hash, full])
+
+        // ===== 滚动条 overview ruler（VS Code 风格）=====
+        // 渲染后测量每个 diff 行的实际 offsetTop/offsetHeight（自动换行下行高不固定，
+        // 只能实测 DOM），按「行位置 ÷ 内容总高」生成红绿色块；比例与滚动位置无关，
+        // 滚动天然同步。分栏修改对（左红右绿）拆为上半红 / 下半绿。
+        const [marks, setMarks] = React.useState(null)
+        const [sbw, setSbw] = React.useState(0)
+        const bodyRef = React.useRef(null)
+        const measureRuler = React.useCallback(() => {
+          const el = bodyRef.current
+          if (!el) return
+          const w = el.offsetWidth - el.clientWidth
+          setSbw((v) => (v === w ? v : w))
+          const H = el.scrollHeight
+          if (H <= el.clientHeight) { setMarks(null); return }
+          const out = []
+          let cur = null
+          const push = (t, top, bot) => {
+            if (cur && cur.t === t && top <= cur.bot + 0.002) { cur.bot = bot; cur.h = bot - cur.top }
+            else { cur = { t, top, bot, h: bot - top }; out.push(cur) }
+          }
+          el.querySelectorAll('.gp-diff-row').forEach((row) => {
+            const top = row.offsetTop / H
+            const bot = (row.offsetTop + row.offsetHeight) / H
+            if (row.classList.contains('gp-dr-add')) push('add', top, bot)
+            else if (row.classList.contains('gp-dr-del')) push('del', top, bot)
+            else if (row.classList.contains('gp-dr-note')) cur = null
+            else {
+              // 分栏行：修改对半行带 gp-dh-add / gp-dh-del；上下文行两者皆无
+              const ha = row.querySelector('.gp-dh-add') != null
+              const hd = row.querySelector('.gp-dh-del') != null
+              if (ha && hd) { push('del', top, (top + bot) / 2); push('add', (top + bot) / 2, bot) }
+              else if (ha) push('add', top, bot)
+              else if (hd) push('del', top, bot)
+              else cur = null
+            }
+          })
+          setMarks(out.length ? out : null)
+        }, [])
+        // 内容变化（切换文件 / split / 全文）后测量；同步一次 + 下一帧校一次（防字体晚加载改行高）
+        React.useEffect(() => {
+          if (state.loading || state.error) return
+          measureRuler()
+          const raf = requestAnimationFrame(() => measureRuler())
+          return () => cancelAnimationFrame(raf)
+        }, [state, split, measureRuler])
+        // 宽度变化（拖拽调宽 / 窗口缩放）会改变换行数与行高分布，监听重算
+        React.useEffect(() => {
+          if (typeof ResizeObserver === 'undefined') return
+          const ro = new ResizeObserver(() => measureRuler())
+          if (bodyRef.current) ro.observe(bodyRef.current)
+          return () => ro.disconnect()
+        }, [measureRuler])
+        // 点击 ruler 按比例跳转（目标行居中到视口）
+        const onRulerClick = (e) => {
+          const el = bodyRef.current
+          if (!el) return
+          const r = e.currentTarget.getBoundingClientRect()
+          const ratio = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+          el.scrollTop = Math.max(0, Math.round(ratio * el.scrollHeight - el.clientHeight / 2))
+        }
 
         React.useEffect(() => {
           const onKey = (e) => { if (e.key === 'Escape') requestClose() }
@@ -1063,24 +1177,40 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           !state.loading && !state.error && (parsed.adds > 0 || parsed.dels > 0) ? React.createElement('span', { className: 'gp-diff-stats' },
             parsed.adds > 0 ? React.createElement('span', { className: 'gp-diff-stat-add' }, '+' + parsed.adds) : null,
             parsed.dels > 0 ? React.createElement('span', { className: 'gp-diff-stat-del' }, '−' + parsed.dels) : null) : null,
-          React.createElement('span', { className: 'gp-chip' }, GROUP_META[sel.group] ? tr(GROUP_META[sel.group].titleKey) : sel.group),
+          // 组徽标：工作区三组显示组名；提交文件显示提交短 hash（悬停看完整 hash）
+          React.createElement('span', { className: 'gp-chip', title: sel.hash || undefined }, sel.group === 'commit' ? (sel.short || String(sel.hash || '').slice(0, 7)) : (GROUP_META[sel.group] ? tr(GROUP_META[sel.group].titleKey) : sel.group)),
+          // 全文切换：开启后整个文件进单个 hunk（改动行红绿高亮、其余作上下文灰显）；
+          // 激活态高亮与分栏切换一致（gp-on）
+          React.createElement('button', { className: 'gp-btn-icon' + (full ? ' gp-on' : ''), title: full ? tr('diffChangesOnly') : tr('diffFullFile'), onClick: () => setFull((v) => { saveFull(!v); return !v }) }, icon('fullDoc')),
           React.createElement('button', { className: 'gp-btn-icon', title: split ? tr('unifiedDiffTitle') : tr('splitDiffTitle'), onClick: () => setSplit((v) => { saveSplit(!v); return !v }) }, icon(split ? 'unified' : 'split')),
           React.createElement('button', { className: 'gp-btn-icon', title: tr('closeDiff'), onClick: requestClose }, icon('close')))
 
-        const body = React.createElement('div', { className: 'gp-diff-body' },
-          state.loading
-            ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), ' ' + tr('loadingDiff'))
-            : state.error
-              ? React.createElement('div', { className: 'gp-empty' }, state.error)
-              : React.createElement('div', { className: 'gp-diff-table' },
-                  parsed.meta.length ? React.createElement('div', { className: 'gp-diff-meta' }, parsed.meta.join('\n')) : null,
-                  split
-                    ? splitPairs.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
-                        b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
-                        b.pairs.map(renderSplitRow)))
-                    : parsed.blocks.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
-                        b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
-                        b.rows.map(renderRow)))))
+        // ruler 覆盖条：浮在原生滚动条内侧（right = 滚动条宽 + 3px 间隙），
+        // 色块按文档比例定位，与滚动位置天然同步
+        const rulerEl = marks ? React.createElement('div', {
+          className: 'gp-diff-ruler', style: { right: (sbw + 3) + 'px' }, onClick: onRulerClick
+        },
+          marks.map((m, i) => React.createElement('div', {
+            key: i, className: 'gp-diff-ruler-mark gp-drm-' + m.t,
+            style: { top: (m.top * 100) + '%', height: (m.h * 100) + '%' }
+          }))) : null
+
+        const body = React.createElement('div', { className: 'gp-diff-body-wrap' },
+          React.createElement('div', { className: 'gp-diff-body', ref: bodyRef },
+            state.loading
+              ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), ' ' + tr('loadingDiff'))
+              : state.error
+                ? React.createElement('div', { className: 'gp-empty' }, state.error)
+                : React.createElement('div', { className: 'gp-diff-table' },
+                    parsed.meta.length ? React.createElement('div', { className: 'gp-diff-meta' }, parsed.meta.join('\n')) : null,
+                    split
+                      ? splitPairs.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
+                          b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
+                          b.pairs.map(renderSplitRow)))
+                      : parsed.blocks.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
+                          b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
+                          b.rows.map(renderRow))))),
+          rulerEl)
 
         // 滑入/滑出相位：off = 未入场或正在关闭 → 整屉藏到不透明的 Git Panel 正后方。
         // 遮罩是一整块（right: panelW，延伸到本面板下方，由面板滑入后盖住）；
@@ -1207,19 +1337,28 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
         })
       }
 
-      function GitGraphView({ repo }) {
+      function GitGraphView({ repo, onOpenDiff, diffSel }) {
         const [state, setState] = React.useState({ loading: true, entries: [], error: '', hasMore: true, loadingMore: false })
         const [hover, setHover] = React.useState(null)
         const [, bumpHover] = React.useReducer((c) => c + 1, 0)
         const [win, setWin] = React.useState({ first: 0, last: 40 })
+        // 行内展开（VSCode 风格）：手风琴式，expanded 为当前展开提交的 hash
+        const [expanded, setExpanded] = React.useState(null)
+        const [filesVer, bumpFiles] = React.useReducer((c) => c + 1, 0)
         const stateRef = React.useRef(state)
         stateRef.current = state
         const listRef = React.useRef(null)
         const hoverHashRef = React.useRef(null)
         const hideRef = React.useRef(null)
         const detailCache = React.useRef(new Map())
+        // hash → {loading} | {files} | {error}：文件列表缓存（首次展开才请求）
+        const filesCache = React.useRef(new Map())
+        const expandedRef = React.useRef(null)
+        expandedRef.current = expanded
         const ROWH = 26
         const PAGE = 200
+        const FILEH = 26   // 展开区文件行行高（含内边距）
+        const MAXVIS = 8   // 展开区可见文件数上限（超出转内部滚动）
 
         const loadPage = React.useCallback(async (skip, append) => {
           if (append) setState((s) => ({ ...s, loadingMore: true }))
@@ -1235,21 +1374,63 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 
         React.useEffect(() => { loadPage(0, false) }, [loadPage])
 
+        // 可变行高：展开行 = ROWH + 展开区高度。展开区高度在文件列表载入前后不同
+        // （loading/错误/空 = 一行提示的高度），依赖 filesVer 触发重算
+        const expandedIdx = React.useMemo(() => state.entries.findIndex((e) => e.hash === expanded), [state.entries, expanded])
+        const heights = React.useMemo(() => {
+          const hs = new Array(state.entries.length)
+          for (let i = 0; i < state.entries.length; i++) {
+            if (i !== expandedIdx) { hs[i] = ROWH; continue }
+            const d = filesCache.current.get(state.entries[i].hash)
+            const n = !d || d.loading || d.error || !d.files ? 1 : Math.min(d.files.length, MAXVIS)
+            hs[i] = ROWH + n * FILEH + 8
+          }
+          return hs
+        }, [state.entries, expandedIdx, filesVer])
+        // 前缀和：tops[i] = 第 i 行纵坐标，tops[len] = 内容总高；供绝对定位与二分查找
+        const tops = React.useMemo(() => {
+          const t = new Array(state.entries.length + 1)
+          t[0] = 0
+          for (let i = 0; i < state.entries.length; i++) t[i + 1] = t[i] + (heights[i] || ROWH)
+          return t
+        }, [heights])
+        const topsRef = React.useRef(tops)
+        topsRef.current = tops
+
         const syncWindow = React.useCallback(() => {
           const el = listRef.current
           if (!el) return
-          const first = Math.max(0, Math.floor(el.scrollTop / ROWH) - 15)
-          const last = Math.min(stateRef.current.entries.length, Math.ceil((el.scrollTop + el.clientHeight) / ROWH) + 15)
+          const t = topsRef.current
+          const len = stateRef.current.entries.length
+          // 二分找首个「底边超过滚动位置」的行（含跨过视口顶端的行），再留 15 行 overscan
+          let lo = 0, hi = len
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid + 1] > el.scrollTop) hi = mid; else lo = mid + 1 }
+          const first = Math.max(0, lo - 15)
+          // 二分找首个「顶边到达视口底」的行（不含），再留 15 行 overscan
+          const y2 = el.scrollTop + el.clientHeight
+          lo = 0; hi = len
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] >= y2) hi = mid; else lo = mid + 1 }
+          const last = Math.min(len, lo + 15)
           setWin((w) => (w.first === first && w.last === last ? w : { first, last }))
           if (stateRef.current.hasMore && !stateRef.current.loadingMore && el.scrollTop + el.clientHeight > el.scrollHeight - 800) {
             loadPage(stateRef.current.entries.length, true)
           }
         }, [loadPage])
 
-        // 滚动加载：到底部前 800px 预取下一页；数据追加后若仍靠近底部则继续加载
-        React.useEffect(() => { syncWindow() }, [state.entries, state.hasMore, state.loading, state.loadingMore, syncWindow])
+        // 滚动加载：到底部前 800px 预取下一页；数据追加后若仍靠近底部则继续加载；
+        // tops 变化（展开/收起改变行高）后同样重算窗口
+        React.useEffect(() => { syncWindow() }, [state.entries, state.hasMore, state.loading, state.loadingMore, syncWindow, tops])
 
         const graph = React.useMemo(() => computeGraph(state.entries), [state.entries])
+
+        // 展开后若文件区超出视口底部则滚动补齐（文件列表异步载入后高度变化也会再校正一次）
+        React.useEffect(() => {
+          if (expandedIdx < 0) return
+          const el = listRef.current
+          if (!el) return
+          const bottom = tops[expandedIdx] + (heights[expandedIdx] || ROWH)
+          if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight
+        }, [expandedIdx, tops, heights])
 
         // 悬停详情（VS Code hover 风格）：离开行/弹层后短暂延迟关闭，滚动立即关闭
         const cancelHide = () => { if (hideRef.current) { hideRef.current(); hideRef.current = null } }
@@ -1278,7 +1459,53 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           ensureDetail(hash)
         }
 
-        const total = state.entries.length * ROWH
+        // 行内展开：文件列表懒加载（仿 detailCache 模式，首次展开才请求）
+        const ensureFiles = (hash) => {
+          if (filesCache.current.has(hash)) return
+          filesCache.current.set(hash, { loading: true })
+          callRpc('commitFiles', { repoId: repo.id, hash }).then((r) => {
+            filesCache.current.set(hash, r && r.ok ? { loading: false, files: r.files || [] } : { loading: false, error: (r && r.error) || tr('loadFailed') })
+            bumpFiles()
+          }).catch((e) => {
+            filesCache.current.set(hash, { loading: false, error: e && e.message ? e.message : String(e) })
+            bumpFiles()
+          })
+        }
+        const toggleExpand = (hash) => {
+          closeHover()
+          const opening = expandedRef.current !== hash
+          setExpanded((cur) => (cur === hash ? null : hash))
+          if (opening) ensureFiles(hash)
+        }
+        // 展开区内容：loading / 错误 / 空（合并提交）提示，或文件列表（点击复用 DiffDrawer）
+        const filesPanel = (e) => {
+          const d = filesCache.current.get(e.hash)
+          if (!d || d.loading) return React.createElement('div', { className: 'gp-grow-files gp-grow-files-note' }, React.createElement('span', { className: 'gp-spinner' }), tr('loadingFiles'))
+          if (d.error) return React.createElement('div', { className: 'gp-grow-files gp-grow-files-note gp-danger' }, d.error)
+          if (d.files.length === 0) return React.createElement('div', { className: 'gp-grow-files gp-grow-files-note' }, tr('commitNoFiles'))
+          return React.createElement('div', { className: 'gp-grow-files' },
+            d.files.map((f) => {
+              const gl = glyphOf(f.status, ' ')
+              const trimmed = f.path.replace(/\/+$/, '')
+              const seg = trimmed.split('/').pop() || f.path
+              const dir = trimmed.length > seg.length ? trimmed.slice(0, trimmed.length - seg.length).replace(/\/+$/, '') : ''
+              return React.createElement('div', {
+                key: f.path, className: 'gp-gfile' + (diffSel && !diffSel.closing && diffSel.repoId === repo.id && diffSel.group === 'commit' && diffSel.hash === e.hash && diffSel.path === f.path ? ' gp-gfile-active' : ''),
+                title: f.path + (f.oldPath ? '  ←  ' + f.oldPath : ''),
+                onClick: (ev) => { ev.stopPropagation(); onOpenDiff(repo, { path: f.path, x: f.status, y: ' ', hash: e.hash, short: e.short }, 'commit') }
+              },
+                React.createElement('span', { className: 'gp-diff-glyph ' + gl.cls }, gl.g),
+                React.createElement('span', { className: 'gp-gfile-name' }, seg),
+                dir ? React.createElement('span', { className: 'gp-gfile-dir' }, dir) : null,
+                f.oldPath ? React.createElement('span', { className: 'gp-gfile-orig', title: f.oldPath }, '← ' + (f.oldPath.replace(/\/+$/, '').split('/').pop() || f.oldPath)) : null,
+                React.createElement('span', { className: 'gp-spacer' }),
+                React.createElement('span', { className: 'gp-gfile-stats' },
+                  f.adds != null && f.adds > 0 ? React.createElement('span', { className: 'gp-gf-add' }, '+' + f.adds) : null,
+                  f.dels != null && f.dels > 0 ? React.createElement('span', { className: 'gp-gf-del' }, '−' + f.dels) : null))
+            }))
+        }
+
+        const total = tops[state.entries.length]
         const maxLane = graph.maxLane
         // 左缘留白 8px：保证 lane 0 的 HEAD 外环（含描边）完整落在视口内不被截断
         const X = (l) => 8 + l * 14
@@ -1291,9 +1518,12 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           const merges = graph.rowMerge[i] || []
           const active = graph.rowActive[i] || []
           const isHead = /HEAD/.test(e.refs || '')
+          const isOpen = i === expandedIdx
+          const rowH = heights[i] || ROWH
           const els = []
           const skipVert = new Set()
-          // 分支/合并连线：平滑 S 形贝塞尔曲线（VS Code 风格），在行的上/下边缘与竖线无缝衔接
+          // 分支/合并连线：平滑 S 形贝塞尔曲线（VS Code 风格），在行的上/下边缘与竖线无缝衔接；
+          // 展开行的下缘端点按整行高延伸，lane 在展开区继续下行（图形不断线）
           for (const m of merges) {
             const x1 = X(m), x2 = X(lane)
             if (graph.laneLast[m] === i) {
@@ -1303,13 +1533,13 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
             } else {
               // 从提交节点分出新 lane / 并入途经 lane：从节点弯向行底
               if (graph.laneSince[m] === i) skipVert.add(m)
-              els.push(React.createElement('path', { key: 'm' + m, d: 'M ' + x2 + ' ' + MID + ' C ' + x2 + ' ' + (MID + 7) + ' ' + x1 + ' ' + (MID + 7) + ' ' + x1 + ' ' + (ROWH + 1), fill: 'none', stroke: laneColor(m), strokeWidth: 1.5, strokeLinecap: 'round' }))
+              els.push(React.createElement('path', { key: 'm' + m, d: 'M ' + x2 + ' ' + MID + ' C ' + x2 + ' ' + (MID + 7) + ' ' + x1 + ' ' + (MID + 7) + ' ' + x1 + ' ' + (rowH + 1), fill: 'none', stroke: laneColor(m), strokeWidth: 1.5, strokeLinecap: 'round' }))
             }
           }
           // 垂直 lane 线：贯穿整行；根提交的 lane 止于节点；已由曲线接管的 lane 不再画竖线
           for (const l of active) {
             if (skipVert.has(l)) continue
-            const y2 = l === lane && (e.parents || []).length === 0 ? MID : ROWH + 1
+            const y2 = l === lane && (e.parents || []).length === 0 ? MID : rowH + 1
             els.push(React.createElement('line', { key: 'v' + l, x1: X(l), y1: -1, x2: X(l), y2, stroke: laneColor(l), strokeWidth: 1.5, strokeLinecap: 'round' }))
           }
           // 提交节点：以背景色描边镂空穿过节点的连线（VS Code 风格）
@@ -1322,11 +1552,26 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           const primary = refs.current || refs.branches[0] || refs.remotes[0]
           if (primary) refEls.push(React.createElement('span', { key: 'p', className: refs.current ? 'gp-grow-ref gp-grow-ref-cur' : 'gp-grow-ref' }, primary))
           refs.tags.forEach((t, ti) => refEls.push(React.createElement('span', { key: 't' + ti, className: 'gp-grow-ref gp-grow-ref-tag' }, t)))
-          rows.push(React.createElement('div', { key: e.hash, className: 'gp-grow', style: { top: i * ROWH, height: ROWH }, onMouseEnter: (ev) => showDetail(e.hash, ev.currentTarget, e.refs, e.short), onMouseLeave: scheduleHide },
-            React.createElement('svg', { width: W, height: ROWH, viewBox: '0 0 ' + W + ' ' + ROWH, style: { display: 'block', flex: '0 0 auto' } }, els),
-            React.createElement('span', { className: 'gp-grow-subject' }, e.subject),
-            refEls.length > 0 ? React.createElement('span', { className: 'gp-grow-refs' }, refEls) : null,
-            React.createElement('span', { className: 'gp-grow-meta' }, (e.author || '') + ' · ' + (e.date || '').slice(0, 10))))
+          const subjectEl = React.createElement('span', { className: 'gp-grow-subject' }, e.subject)
+          const refsEl = refEls.length > 0 ? React.createElement('span', { className: 'gp-grow-refs' }, refEls) : null
+          const metaEl = React.createElement('span', { className: 'gp-grow-meta' }, (e.author || '') + ' · ' + (e.date || '').slice(0, 10))
+          // 展开行：SVG 拉高使 lane 贯穿，右侧为「顶栏 + 文件列表」纵向列；普通行保持原平铺。
+          // 展开态复用 gp-grow-sel（选中样式：品牌色左边条 + 浅底）
+          rows.push(React.createElement('div', {
+            key: e.hash, className: 'gp-grow' + (isOpen ? ' gp-grow-sel' : ''), style: { top: tops[i], height: rowH },
+            onClick: () => toggleExpand(e.hash),
+            onMouseEnter: (ev) => { if (!isOpen) showDetail(e.hash, ev.currentTarget, e.refs, e.short) },
+            onMouseLeave: scheduleHide
+          },
+            React.createElement('svg', { width: W, height: rowH, viewBox: '0 0 ' + W + ' ' + rowH, style: { display: 'block', flex: '0 0 auto' } }, els),
+            isOpen
+              ? React.createElement('div', { className: 'gp-grow-col' },
+                  React.createElement('div', { className: 'gp-grow-bar' }, subjectEl, refsEl, metaEl),
+                  filesPanel(e))
+              : null,
+            isOpen ? null : subjectEl,
+            isOpen ? null : refsEl,
+            isOpen ? null : metaEl))
         }
 
         const body = state.loading ? React.createElement('div', { className: 'gp-empty' }, tr('loadingHistory')) :
@@ -1493,7 +1738,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           React.createElement('div', { className: 'gp-menu-sep' }),
           React.createElement('button', { className: 'gp-menu-item', onClick: () => { setRulesMenuOpen(false); setOpenGenModel(true) } }, tr('genModelConfig')),
           React.createElement('div', { className: 'gp-menu-sep' }),
-          React.createElement('div', { className: 'gp-menu-note' }, fmt(tr('effectiveRules'), { s: rulesInfo ? (rulesInfo.source === 'repo' ? tr('ruleRepo') : rulesInfo.source === 'global' ? tr('ruleGlobal') : tr('ruleBuiltin')) : tr('loading') })),
+          React.createElement('div', { className: 'gp-menu-note' }, fmt(tr('effectiveRules'), { s: rulesInfo ? (rulesInfo.source === 'repo' ? tr('repoRules') : rulesInfo.source === 'global' ? tr('globalRules') : tr('ruleBuiltin')) : tr('loading') })),
           genModel ? React.createElement('div', { className: 'gp-menu-note' }, fmt(tr('genModelCurrent'), { m: genModel })) : null
         ) : null
 
@@ -1708,9 +1953,11 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           // eslint-disable-next-line react-hooks/exhaustive-deps
         }, [data])
 
-        // 激活行随操作移组/消失时自动关闭 diff 抽屉，避免抽屉展示过期内容
+        // 激活行随操作移组/消失时自动关闭 diff 抽屉，避免抽屉展示过期内容；
+        // 提交内 diff（group='commit'）的目标来自历史而非工作区变更集，不适用此守卫
         React.useEffect(() => {
           if (!data || !diffSel || diffSel.repoId !== repo.id) return
+          if (diffSel.group === 'commit') return
           const list = data[diffSel.group]
           const alive = Array.isArray(list) && list.some((f) => f.path === diffSel.path)
           if (!alive && onCloseDiff) onCloseDiff()
@@ -1947,7 +2194,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
               icon(historyOpen ? 'chevronDown' : 'chevronRight', 12),
               icon('history'),
               tr('history')),
-            historyOpen ? React.createElement(GitGraphView, { repo }) : null)
+            historyOpen ? React.createElement(GitGraphView, { repo, onOpenDiff, diffSel }) : null)
 
         // 确认弹窗用 fixed 定位，放在卡片外层（Fragment），避免任何卡片内堆叠上下文干扰
         return React.createElement(React.Fragment, null,
@@ -2151,11 +2398,12 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
               scan.repos.length === 0 ? React.createElement('div', { className: 'gp-empty' }, tr('noRepos')) :
                 scan.repos.map((r) => React.createElement(RepoCard, {
                   key: r.id, repo: r, sessionId, diffSel, onCloseDiff: requestCloseDiff,
-                  // 普通点击行 = 单选该行并打开 diff；再次点击同一行（同 repo 同组同路径）=
-                  // 进入关闭相位（抽屉滑出动效播完才卸载，见 requestCloseDiff/finishCloseDiff）
-                  onOpenDiff: (repo2, f, group) => setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group
+                  // 普通点击行 = 单选该行并打开 diff；再次点击同一行（同 repo 同组同路径，
+                  // 提交文件还须同 hash）= 进入关闭相位（抽屉滑出动效播完才卸载，见
+                  // requestCloseDiff/finishCloseDiff）
+                  onOpenDiff: (repo2, f, group) => setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group && (prev.hash || null) === (f.hash || null)
                     ? { ...prev, closing: true }
-                    : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y })
+                    : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y, hash: f.hash || null, short: f.short || '' })
                 })))
 
         // 折叠/展开渲染：稳态只渲染一种形态（panelOpen 语义不变，自动刷新轮询继续）；

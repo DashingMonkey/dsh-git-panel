@@ -173,7 +173,7 @@ export default function () {
           errBadBranch: '非法分支名', errSwitch: '切换分支失败: {e}',
           errStash: 'stash 失败: {e}', errStashPop: 'stash pop 失败: {e}',
           errReset: 'reset 失败: {e}', errClean: 'clean 失败: {e}',
-          errDiff: 'diff 失败: {e}', noDiff: '（无差异）',
+          errDiff: 'diff 失败: {e}', noDiff: '（无差异）', fullTruncated: '……（文件过大，全文视图已截断）',
           errStatus: '读取状态失败: {e}',
           errNoLlm: '未找到可用的 LLM provider/model', errEmptyGen: '模型未产出内容', errGenAborted: '生成被终止: {m}',
           errGenTruncated: '生成被截断（token 额度不足），请重试',
@@ -189,7 +189,7 @@ export default function () {
           copied: '已复制到剪贴板', errCopy: '复制失败: {e}',
           errBranches: '读取分支失败: {e}', errNoBranchName: '缺少分支名',
           errStashList: '读取 stash 失败: {e}', errBadHash: '非法 hash', errBadRef: '非法 stash 引用',
-          errCommitDetail: '读取提交失败: {e}', errLog: '读取历史失败: {e}',
+          errCommitDetail: '读取提交失败: {e}', errLog: '读取历史失败: {e}', errCommitFiles: '读取提交文件失败: {e}',
           dirLabel: '目录: {p}', truncated: '…（条目过多，已截断）',
           stagedN: '已暂存 {n} 个文件', unstagedN: '已取消暂存 {n} 个文件',
           committedN: '已提交 {n} 个文件', pushed: '推送成功',
@@ -215,7 +215,7 @@ export default function () {
           errBadBranch: 'Invalid branch name', errSwitch: 'Failed to switch branch: {e}',
           errStash: 'stash failed: {e}', errStashPop: 'stash pop failed: {e}',
           errReset: 'reset failed: {e}', errClean: 'clean failed: {e}',
-          errDiff: 'diff failed: {e}', noDiff: '(no differences)',
+          errDiff: 'diff failed: {e}', noDiff: '(no differences)', fullTruncated: '...(file too large, full view truncated)',
           errStatus: 'Failed to read status: {e}',
           errNoLlm: 'No LLM provider/model available', errEmptyGen: 'Model produced no output', errGenAborted: 'Generation aborted: {m}',
           errGenTruncated: 'Generation truncated (token budget exhausted), please retry',
@@ -231,7 +231,7 @@ export default function () {
           copied: 'Copied to clipboard', errCopy: 'Copy failed: {e}',
           errBranches: 'Failed to read branches: {e}', errNoBranchName: 'Missing branch name',
           errStashList: 'Failed to read stash: {e}', errBadHash: 'Invalid hash', errBadRef: 'Invalid stash ref',
-          errCommitDetail: 'Failed to read commit: {e}', errLog: 'Failed to read history: {e}',
+          errCommitDetail: 'Failed to read commit: {e}', errLog: 'Failed to read history: {e}', errCommitFiles: 'Failed to read commit files: {e}',
           dirLabel: 'Directory: {p}', truncated: '…(too many entries, truncated)',
           stagedN: 'Staged {n} file(s)', unstagedN: 'Unstaged {n} file(s)',
           committedN: 'Committed {n} file(s)', pushed: 'Push succeeded',
@@ -877,7 +877,30 @@ export default function () {
       }
 
       // ============ diff（只读） ============
-      async function fileDiff(repo, path, group) {
+      // full=true 时用 -U1000000（超大上下文）让单个 hunk 覆盖整个文件：
+      // 输出仍是标准 unified diff，前端 parseDiff 零改动，改动行照常红绿高亮、
+      // 其余行作为上下文行渲染。全文输出超过 1MB 时截断并附 note 行提示。
+      const DIFF_FULL_U = '-U1000000'
+      const DIFF_FULL_MAX = 1024 * 1024
+      const capFullText = (text, full) => full && text.length > DIFF_FULL_MAX
+        ? text.slice(0, DIFF_FULL_MAX).replace(/\n+$/, '') + '\n\\ ' + tr('fullTruncated')
+        : text
+      async function fileDiff(repo, path, group, hash, full) {
+        // 提交内单文件 diff：与第一父提交比较（合并提交取 first-parent 语义）；
+        // 根提交无父提交，`hash^` 会报 bad revision → 回退 git show（对空树的全量 diff，
+        // 输出同样是 diff --git 头 + hunk，前端 parseDiff 无需区分；根提交全文件皆新增，
+        // 上下文参数无意义，回退分支不带 -U）
+        if (group === 'commit') {
+          const base = full ? ['diff', hash + '^', hash, DIFF_FULL_U] : ['diff', hash + '^', hash]
+          const r = await gitRun(repo.path, base.concat(['--', path]), { maxBytes: 512 * 1024, timeoutMs: 60000 })
+          let text = (r.text || '').trim()
+          if (r.code !== 0) {
+            const s = await gitRun(repo.path, ['show', '--format=', hash, '--', path], { maxBytes: 512 * 1024, timeoutMs: 60000 })
+            if (s.code !== 0) return fail(fmt(tr('errDiff'), { e: (s.errText || s.text).slice(0, 200) }))
+            text = (s.text || '').trim()
+          }
+          return ok({ text: capFullText(text, full) || tr('noDiff'), kind: group })
+        }
         if (group === 'untracked') {
           const fullPath = repo.path + '/' + path
           let target = null
@@ -913,15 +936,17 @@ export default function () {
           const content = await fsReadText(fullPath)
           if (content === null) return ok({ text: tr('errBinary'), kind: 'untracked' })
           const allLines = content.split('\n')
-          const capped = allLines.slice(0, 4000).map((l) => '+' + l).join('\n')
-          const text = 'diff --git a/' + path + ' b/' + path + '\nnew file mode 100644\n--- /dev/null\n+++ b/' + path + '\n@@ -0,0 +1,' + Math.min(4000, allLines.length) + ' @@\n' + capped
-          return ok({ text: text.slice(0, 500 * 1024), kind: 'untracked' })
+          // 未跟踪文件本就整文件展示（合成全 + 行的 diff）；全文模式仅放宽行数上限
+          const LIMIT = full ? 20000 : 4000
+          const capped = allLines.slice(0, LIMIT).map((l) => '+' + l).join('\n')
+          const text = 'diff --git a/' + path + ' b/' + path + '\nnew file mode 100644\n--- /dev/null\n+++ b/' + path + '\n@@ -0,0 +1,' + Math.min(LIMIT, allLines.length) + ' @@\n' + capped
+          return ok({ text: capFullText(text, full).slice(0, 500 * 1024), kind: 'untracked' })
         }
-        const args = group === 'staged' ? ['diff', '--staged', '--', path] : ['diff', '--', path]
+        const args = (group === 'staged' ? ['diff', '--staged'] : ['diff']).concat(full ? [DIFF_FULL_U] : [], ['--', path])
         const r = await gitRun(repo.path, args, { maxBytes: 512 * 1024, timeoutMs: 60000 })
         if (r.code !== 0) return fail(fmt(tr('errDiff'), { e: (r.errText || r.text).slice(0, 200) }))
         const text = (r.text || '').trim()
-        return ok({ text: text || tr('noDiff'), kind: group })
+        return ok({ text: capFullText(text, full) || tr('noDiff'), kind: group })
       }
 
       // ============ AI 生成提交信息 ============
@@ -1424,6 +1449,14 @@ export default function () {
         const repo = repoOf(args && args.repoId)
         if (!repo) return fail(tr('errRepoMissing'))
         if (!args || typeof args.path !== 'string') return fail(tr('errNoPath'))
+        // 提交内单文件 diff：hash 通过格式校验即可（git 侧 `--` pathspec 已限定仓库内
+        // 路径，与工作区 diff 同一暴露面，无需再比对当前变更集）
+        if (args.group === 'commit') {
+          const hash = String(args.hash || '').trim()
+          if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) return fail(tr('errBadHash'))
+          await audit({ op: 'diff', repo: repo.path, file: args.path, group: 'commit', hash })
+          return await fileDiff(repo, args.path, 'commit', hash, args.full === true)
+        }
         // 与写操作同一标准：path 必须属于当前变更集的对应分组（纵深防御，
         // 防止任意 path 被当作 untracked 读取渲染到面板）
         const group = args.group === 'staged' ? 'staged' : args.group === 'untracked' ? 'untracked' : 'unstaged'
@@ -1432,7 +1465,7 @@ export default function () {
         const known = new Set(st[group].map((f) => f.path))
         if (!known.has(args.path)) return fail(fmt(tr('errNotChanged'), { f: args.path }))
         await audit({ op: 'diff', repo: repo.path, file: args.path, group })
-        return await fileDiff(repo, args.path, group)
+        return await fileDiff(repo, args.path, group, null, args.full === true)
       })
 
       registerRpc('generate', async (args) => {
@@ -1733,6 +1766,61 @@ export default function () {
         if (show.code !== 0) return fail(fmt(tr('errCommitDetail'), { e: (show.errText || show.text).slice(0, 200) }))
         const mf = (meta.text || '').trim().split('\u001f')
         return ok({ message: (msgR.text || '').trim().slice(0, 4000), author: mf[0] || '', email: mf[1] || '', date: mf[2] || '', subject: mf[3] || '', stat: (show.text || '').trim().slice(0, 12000) })
+      })
+
+      // 提交的变更文件列表（历史行内展开用）：结构化 [{status, path, oldPath, adds, dels}]
+      // - name-status（-z NUL 分隔）为顺序来源：普通记录 "状态\0路径\0"，
+      //   重命名/复制 "R100\0旧路径\0新路径\0"
+      // - numstat 提供每文件增删行数：普通 "adds\tdels\t路径\0"（二进制为 "-\t-\t"），
+      //   重命名 "adds\tdels\t\0旧路径\0新路径\0"（路径段为空 + 两个 NUL 路径）
+      // - --root 使根提交（无父）也能列出全部新增；-M 开启重命名检测
+      // - 合并提交默认输出为空（无 combined 差异），前端显示「无文件变更」
+      registerRpc('commitFiles', async (args) => {
+        const repo = repoOf(args && args.repoId)
+        if (!repo) return fail(tr('errRepoMissing'))
+        const hash = String((args && args.hash) || '').trim()
+        if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) return fail(tr('errBadHash'))
+        const [ns, num] = await Promise.all([
+          gitRun(repo.path, ['diff-tree', '--root', '--no-commit-id', '-r', '-M', '-z', '--name-status', hash], { maxBytes: 2 * 1024 * 1024, timeoutMs: 60000 }),
+          gitRun(repo.path, ['diff-tree', '--root', '--no-commit-id', '-r', '-M', '-z', '--numstat', hash], { maxBytes: 2 * 1024 * 1024, timeoutMs: 60000 })
+        ])
+        if (ns.code !== 0) return fail(fmt(tr('errCommitFiles'), { e: (ns.errText || ns.text).slice(0, 200) }))
+        const stats = new Map()
+        if (num.code === 0) {
+          const toks = String(num.text || '').split('\0')
+          for (let i = 0; i < toks.length; i++) {
+            const m = /^(\d+|-)\t(\d+|-)\t(.*)$/.exec(toks[i])
+            if (!m) continue
+            const adds = m[1] === '-' ? null : Number(m[1])
+            const dels = m[2] === '-' ? null : Number(m[2])
+            if (m[3] === '' && toks[i + 1] != null && toks[i + 2] != null) {
+              stats.set(toks[i + 2], { adds, dels }) // 重命名：键为新路径
+              i += 2
+            } else stats.set(m[3], { adds, dels })
+          }
+        }
+        const files = []
+        const toks = String(ns.text || '').split('\0')
+        for (let i = 0; i < toks.length; i++) {
+          const st = toks[i]
+          if (!st) continue
+          const letter = st[0]
+          const isRen = letter === 'R' || letter === 'C'
+          const p1 = toks[i + 1]
+          if (p1 == null) break
+          if (isRen) {
+            const p2 = toks[i + 2]
+            if (p2 == null) break
+            const s = stats.get(p2) || {}
+            files.push({ status: letter, path: p2, oldPath: p1, adds: s.adds, dels: s.dels })
+            i += 2
+          } else {
+            const s = stats.get(p1) || {}
+            files.push({ status: letter, path: p1, oldPath: '', adds: s.adds, dels: s.dels })
+            i += 1
+          }
+        }
+        return ok({ files })
       })
 
       console.log('[git-panel] Host 已就绪')
