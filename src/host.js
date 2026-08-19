@@ -16,10 +16,17 @@
  *   - 文件形态（npm 包）：默认导出 Cordis 插件，apply(ctx, config) 的第二参接收
  *     组合行 config（cordis.yml），其中 scanMaxDepth / scanMaxDirs / scanMaxRepos
  *     覆盖扫描上限；Client 半体见 ./client.js（dsh.client 约定）。
+ *
+ * 分节索引（apply 内按序）：
+ *   Host 服务与扫描配置 → 内置默认规则常量 → 协议与路径工具 → 国际化 →
+ *   进程执行（git 执行层）→ 路径/审计 → YAML 迷你编解码 → 仓库注册表 →
+ *   规则读写 → 仓库发现 → 扫描缓存 → git 状态 → diff（只读）→
+ *   AI 生成提交信息 → 写操作 → RPC（Client → Host）
  */
 export default function () {
   return {
     apply(ctx, cfg) {
+      // ============ Host 服务与扫描配置 ============
       const fs = ctx.get('fs')
       const subprocess = ctx.get('subprocess')
       const llm = ctx.get('llm')
@@ -56,6 +63,7 @@ export default function () {
         maxRepos: scanLimit(cfg.scanMaxRepos, 50, 1, 2000)
       }
 
+      // ============ 内置默认规则常量（DEFAULT + LEGACY 历史版，见 ensureDefaultRules） ============
       // 内置默认规则：中英两版，跟随面板语言（见 builtinRules / ensureDefaultRules）。
       // 用户编辑过的规则文件不因语言切换被覆盖（pristine 检查）；LEGACY_DEFAULT_RULES
       // 收录上一版内置默认，让磁盘上从未编辑过的旧默认文件也能随内置规则升级自动重写。
@@ -99,16 +107,17 @@ export default function () {
         // v1：初始版
         {
           zh: {
-          system_prompt: '你是一个 Git Commit Message 生成助手，请严格遵循以下规则：\n\n1. 使用 Conventional Commits 规范\n2. 输出格式：\n   <type>(<scope>): <subject>\n\n   <body>\n\n   <footer>\n3. 只允许指定的 type：\n   feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n4. subject：\n   - 动词开头\n   - 不超过 50 字\n   - 不加句号\n5. body：\n   - 说明"为什么改"和"改了什么"\n   - 每行 ≤ 72 字\n6. 使用中文（除非代码库本身是英文）\n7. 不要生成多余解释，只输出 commit message\n8. 若变更涉及多个模块，优先选择最核心的 scope',
-          user_context: '# 当前仓库信息\n仓库名：{repo_name}\n当前分支：{branch}\n变更文件列表：\n{file_list}\n\n# 当前 staged diff\n{staged_diff}\n\n# 请基于以上信息生成一条符合规则的 commit message。'
-        },
-        en: {
-          system_prompt: 'You are a Git commit message generator. Follow these rules strictly:\n\n1. Use the Conventional Commits specification\n2. Output format:\n   <type>(<scope>): <subject>\n\n   <body>\n\n   <footer>\n3. Allowed types only:\n   feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n4. subject:\n   - Start with a verb\n   - No longer than 50 characters\n   - No trailing period\n5. body:\n   - Explain "why it changed" and "what changed"\n   - Wrap lines at 72 characters\n6. Write in English (unless the codebase itself uses another language)\n7. Output only the commit message, no extra explanation\n8. If the change spans multiple modules, pick the most central scope',
-          user_context: '# Repository info\nRepository: {repo_name}\nBranch: {branch}\nChanged files:\n{file_list}\n\n# Staged diff\n{staged_diff}\n\n# Generate a commit message that follows the rules above.'
-        }
+            system_prompt: '你是一个 Git Commit Message 生成助手，请严格遵循以下规则：\n\n1. 使用 Conventional Commits 规范\n2. 输出格式：\n   <type>(<scope>): <subject>\n\n   <body>\n\n   <footer>\n3. 只允许指定的 type：\n   feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n4. subject：\n   - 动词开头\n   - 不超过 50 字\n   - 不加句号\n5. body：\n   - 说明"为什么改"和"改了什么"\n   - 每行 ≤ 72 字\n6. 使用中文（除非代码库本身是英文）\n7. 不要生成多余解释，只输出 commit message\n8. 若变更涉及多个模块，优先选择最核心的 scope',
+            user_context: '# 当前仓库信息\n仓库名：{repo_name}\n当前分支：{branch}\n变更文件列表：\n{file_list}\n\n# 当前 staged diff\n{staged_diff}\n\n# 请基于以上信息生成一条符合规则的 commit message。'
+          },
+          en: {
+            system_prompt: 'You are a Git commit message generator. Follow these rules strictly:\n\n1. Use the Conventional Commits specification\n2. Output format:\n   <type>(<scope>): <subject>\n\n   <body>\n\n   <footer>\n3. Allowed types only:\n   feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n4. subject:\n   - Start with a verb\n   - No longer than 50 characters\n   - No trailing period\n5. body:\n   - Explain "why it changed" and "what changed"\n   - Wrap lines at 72 characters\n6. Write in English (unless the codebase itself uses another language)\n7. Output only the commit message, no extra explanation\n8. If the change spans multiple modules, pick the most central scope',
+            user_context: '# Repository info\nRepository: {repo_name}\nBranch: {branch}\nChanged files:\n{file_list}\n\n# Staged diff\n{staged_diff}\n\n# Generate a commit message that follows the rules above.'
+          }
         }
       ]
 
+      // ============ 协议与路径工具 ============
       function sanitizeName(name) { return String(name || 'repo').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 80) }
 
       // 路径键规范化：盘符大小写与 '/' / '\\' 变体对齐，去尾部分隔符。
@@ -343,10 +352,11 @@ export default function () {
       }
 
       // commit 的 message 已占 stdin，部分提交的 pathspec 改落 .git 下临时文件
-      //（仓库工作区内，fs 写权限可覆盖）；worktree 的 .git 是文件时会失败，回退 argv
+      //（仓库工作区内，fs 写权限可覆盖）；文件名带唯一后缀，防同仓库并发部分提交
+      // 互相覆盖，用完即删；worktree 的 .git 是文件时会失败，回退 argv
       async function writePathspecFile(repo, files) {
         try {
-          const p = joinPath(repo.path, '.git', 'git-panel-pathspec')
+          const p = joinPath(repo.path, '.git', 'git-panel-pathspec-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8))
           await fsWriteText(p, files.join('\u0000'))
           return p
         } catch (e) { return null }
@@ -876,6 +886,19 @@ export default function () {
         return ok({ branch, upstream, aheadBehind, staged, unstaged, untracked, statusError: statusR.code === 0 ? null : (statusR.errText || statusR.text).slice(0, 200) })
       }
 
+      // repoStatus + 变更集成员校验（stage/unstage/discard/prepareGenerate/fileDiff
+      // 共用）：状态读取失败或 files 含变更集外路径时返回 fail——与写操作同一标准，
+      // 防任意路径被当作操作目标；errKey 选违例文案（unstage 用 errNotStaged，其余
+      // errNotChanged）。通过则返回 { status, known }。
+      async function checkFilesInGroups(repo, files, groups, errKey) {
+        const status = await repoStatus(repo)
+        if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
+        const known = new Set()
+        for (const g of groups) for (const f of status[g]) known.add(f.path)
+        for (const f of files) if (!known.has(f)) return fail(fmt(tr(errKey), { f }))
+        return ok({ status, known })
+      }
+
       // ============ diff（只读） ============
       // full=true 时用 -U1000000（超大上下文）让单个 hunk 覆盖整个文件：
       // 输出仍是标准 unified diff，前端 parseDiff 零改动，改动行照常红绿高亮、
@@ -902,7 +925,7 @@ export default function () {
           return ok({ text: capFullText(text, full) || tr('noDiff'), kind: group })
         }
         if (group === 'untracked') {
-          const fullPath = repo.path + '/' + path
+          const fullPath = joinPath(repo.path, path)
           let target = null
           try { target = await fs.resolve(fullPath) } catch (e) { /* ignore */ }
           let info = null
@@ -1036,13 +1059,11 @@ export default function () {
 
       async function prepareGenerate(repo, files) {
         const rules = await loadEffectiveRules(repo)
-        const status = await repoStatus(repo)
-        if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
+        const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
+        if (!chk.ok) return chk
+        const status = chk.status
         const untrackedSet = new Set(status.untracked.map((f) => f.path))
         const stagedSet = new Set(status.staged.map((f) => f.path))
-        // 与写操作同一标准：只接受当前变更集内的文件，防任意路径被当作 diff 目标
-        const changedSet = new Set(status.unstaged.map((f) => f.path).concat(Array.from(untrackedSet)).concat(Array.from(stagedSet)))
-        for (const f of files) if (!changedSet.has(f)) return fail(fmt(tr('errNotChanged'), { f }))
         // 生成上下文预算：120KB（约 40K tokens）足够覆盖常见多文件改动；
         // 单文件 git diff 的 stdout 上限 64KB（超出会自动 spill 后读全，非硬截断）。
         const DIFF_TOTAL_BUDGET = 120 * 1024
@@ -1143,7 +1164,7 @@ export default function () {
 
       // ============ 写操作执行 ============
       // 审批体系已整体移除：所有写操作（commit/pull/push/switch/stash/reset/clean/discard）
-      // 由面板用户显式点击触发后直接执行（类似 VS Code），仅保留审计记录。
+      // 由面板用户显式点击触发后直接执行，仅保留审计记录。
       async function runWriteOp(toolName, repo, op, extra) {
         let res
         try { res = await op() }
@@ -1157,24 +1178,32 @@ export default function () {
         return r || null
       }
 
+      // repo 型 RPC 的公共前置：repoId 解析 + 缺失快速失败（约 20 个注册点共用）
+      const withRepo = (fn) => async (args) => {
+        const repo = repoOf(args && args.repoId)
+        if (!repo) return fail(tr('errRepoMissing'))
+        return await fn(repo, args)
+      }
+
+      // 规则类 RPC 的 repo 解析：面板未激活仓库时（纯规则编辑场景）退回 repoName
+      // 兜底对象（path 为 null → 仓库专属规则不可用，仅全局规则生效）
+      const resolveRulesRepo = (args) => repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
+
       // ============ 写操作 ============
       // 暂存/取消暂存：可逆的本地 index 操作（不写提交、不触网），由面板用户显式点击触发，
       // 不经审批门（否则每次点 ＋ 都会弹确认窗，不可用）；仍写审计日志。commit/push 等不变。
       async function opStage(repo, files) {
-        const status = await repoStatus(repo)
-        if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
-        const known = new Set(status.unstaged.map((f) => f.path).concat(status.untracked.map((f) => f.path)).concat(status.staged.map((f) => f.path)))
-        for (const f of files) if (!known.has(f)) return fail(fmt(tr('errNotChanged'), { f }))
+        const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
+        if (!chk.ok) return chk
         const r = await gitRunFiles(repo.path, ['add'], files, { maxBytes: 128 * 1024, timeoutMs: 60000 })
         if (r.code !== 0) return fail(fmt(tr('errAdd'), { e: (r.errText || r.text).slice(0, 300) }))
         return ok({ summary: fmt(tr('stagedN'), { n: files.length }) })
       }
 
       async function opUnstage(repo, files) {
-        const status = await repoStatus(repo)
-        if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
-        const stagedInfo = new Map(status.staged.map((f) => [f.path, f]))
-        for (const f of files) if (!stagedInfo.has(f)) return fail(fmt(tr('errNotStaged'), { f }))
+        const chk = await checkFilesInGroups(repo, files, ['staged'], 'errNotStaged')
+        if (!chk.ok) return chk
+        const stagedInfo = new Map(chk.status.staged.map((f) => [f.path, f]))
         // rename/copy 的旧路径（orig）必须一并 reset，否则旧路径的删除仍留在 index，
         // 提交后会丢失该文件内容（与 opCommit 同一口径）
         const targets = []
@@ -1189,7 +1218,8 @@ export default function () {
       }
 
       // 提交：只处理已暂存（staged）文件，不再隐式 add/reset。
-      // files 为空 = 全部 staged；files 为 staged 子集时用 pathspec 部分提交。
+      // files 为空 = 全部 staged（当前唯一调用方 commit RPC 已拦截空数组，此为内部
+      // 语义保留）；files 为 staged 子集时用 pathspec 部分提交。
       async function opCommit(repo, files, message) {
         const status = await repoStatus(repo)
         if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
@@ -1206,16 +1236,22 @@ export default function () {
           if (orig && targets.indexOf(orig) < 0) targets.push(orig)
         }
         const args = ['commit', '-F', '-']
+        let specFile = null
         if (targets.length !== stagedPaths.length) {
           // 提交信息已占 stdin，部分提交的 pathspec 改落临时文件（失败回退 argv）
-          const specFile = await writePathspecFile(repo, targets)
+          specFile = await writePathspecFile(repo, targets)
           if (specFile) args.push('--pathspec-from-file=' + specFile, OPT_PATHSPEC_FILE_NUL)
           else args.push('--', ...targets)
         }
-        // 提交信息走 stdin（-F -），避免 Windows 命令行 ~32K 上限与特殊字符问题
-        const rc = await gitRun(repo.path, args, { stdinData: message, maxBytes: 256 * 1024, timeoutMs: 120000 })
-        if (rc.code !== 0) return fail(fmt(tr('errCommit'), { e: (rc.errText || rc.text).slice(0, 400) }))
-        return ok({ summary: fmt(tr('committedN'), { n: requested.length }), detail: (rc.text || '').trim().slice(0, 400) })
+        try {
+          // 提交信息走 stdin（-F -），避免 Windows 命令行 ~32K 上限与特殊字符问题
+          const rc = await gitRun(repo.path, args, { stdinData: message, maxBytes: 256 * 1024, timeoutMs: 120000 })
+          if (rc.code !== 0) return fail(fmt(tr('errCommit'), { e: (rc.errText || rc.text).slice(0, 400) }))
+          return ok({ summary: fmt(tr('committedN'), { n: requested.length }), detail: (rc.text || '').trim().slice(0, 400) })
+        } finally {
+          // 临时 pathspec 文件用完即删（不存在时 force 语义下也算成功）
+          if (specFile) await removeFileAnywhere(specFile)
+        }
       }
 
       async function opPush(repo) {
@@ -1288,10 +1324,9 @@ export default function () {
       //   unstaged  组 → git checkout --（工作区恢复到 index，保留已暂存部分）
       //   untracked 组 → git clean -fd（删除未跟踪文件）
       async function opDiscard(repo, files, group) {
-        const status = await repoStatus(repo)
-        if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
-        const known = new Set((group === 'staged' ? status.staged : group === 'untracked' ? status.untracked : status.unstaged).map((f) => f.path))
-        for (const f of files) if (!known.has(f)) return fail(fmt(tr('errNotChanged'), { f }))
+        const chk = await checkFilesInGroups(repo, files, [group], 'errNotChanged')
+        if (!chk.ok) return chk
+        const status = chk.status
         const run = (args) => gitRunFiles(repo.path, args, files, { maxBytes: 128 * 1024, timeoutMs: 60000 })
         if (group === 'staged') {
           // rename/copy 的旧路径（orig）必须一并恢复（与 opCommit 同一口径），
@@ -1356,6 +1391,7 @@ export default function () {
           try { return toEnvelope(await fn(payload || {})) } catch (e) { return toEnvelope(fail(e && e.message ? e.message : String(e))) }
         }, { authority: 'loopback' })
       }
+      // ---- 会话 / 扫描 ----
       registerRpc('setLocale', async (args) => {
         const prev = currentLocale
         const l = args && args.locale
@@ -1438,16 +1474,13 @@ export default function () {
         return res
       })
 
-      registerRpc('status', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      // ---- 状态与 diff 查询（只读） ----
+      registerRpc('status', withRepo(async (repo) => {
         // 只读且高频（面板 4 秒轮询），不写审计，避免日志噪声海没写操作记录
         return await repoStatus(repo)
-      })
+      }))
 
-      registerRpc('fileDiff', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('fileDiff', withRepo(async (repo, args) => {
         if (!args || typeof args.path !== 'string') return fail(tr('errNoPath'))
         // 提交内单文件 diff：hash 通过格式校验即可（git 侧 `--` pathspec 已限定仓库内
         // 路径，与工作区 diff 同一暴露面，无需再比对当前变更集）
@@ -1460,17 +1493,14 @@ export default function () {
         // 与写操作同一标准：path 必须属于当前变更集的对应分组（纵深防御，
         // 防止任意 path 被当作 untracked 读取渲染到面板）
         const group = args.group === 'staged' ? 'staged' : args.group === 'untracked' ? 'untracked' : 'unstaged'
-        const st = await repoStatus(repo)
-        if (!st.ok) return fail(fmt(tr('errStatus'), { e: st.error }))
-        const known = new Set(st[group].map((f) => f.path))
-        if (!known.has(args.path)) return fail(fmt(tr('errNotChanged'), { f: args.path }))
+        const chk = await checkFilesInGroups(repo, [args.path], [group], 'errNotChanged')
+        if (!chk.ok) return chk
         await audit({ op: 'diff', repo: repo.path, file: args.path, group })
         return await fileDiff(repo, args.path, group, null, args.full === true)
-      })
+      }))
 
-      registerRpc('generate', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      // ---- AI 生成提交信息 ----
+      registerRpc('generate', withRepo(async (repo, args) => {
         if (!args || !Array.isArray(args.files) || args.files.length === 0) return fail(tr('errGenerateNoFiles'))
         await audit({ op: 'generate', repo: repo.path, files: args.files.length })
         const prep = await prepareGenerate(repo, args.files.map(String))
@@ -1479,7 +1509,7 @@ export default function () {
         genTasks.set(genId, { genId, text: '', done: false, error: '', ruleSource: prep.rules.source, provider: prep.sel.provider, model: prep.sel.model })
         runGenerate(genId, prep)
         return ok({ genId })
-      })
+      }))
 
       registerRpc('generatePoll', async (args) => {
         const genId = args && args.genId ? String(args.genId) : ''
@@ -1523,8 +1553,9 @@ export default function () {
         } catch (e) { return fail(e && e.message ? e.message : String(e)) }
       })
 
+      // ---- 规则读写 ----
       registerRpc('rulesGet', async (args) => {
-        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
+        const repo = resolveRulesRepo(args)
         const defPath = await rulesFilePath(repo, 'global')
         const rr = await readRepoRules(repo)
         const defYaml = (await fsReadText(defPath)) || emitRulesYaml(builtinRules())
@@ -1534,7 +1565,7 @@ export default function () {
       })
 
       registerRpc('rulesSave', async (args) => {
-        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
+        const repo = resolveRulesRepo(args)
         const scope = args && args.scope === 'repo' ? 'repo' : 'global'
         if (!args || typeof args.yaml !== 'string') return fail(tr('errNoYaml'))
         const parsed = parseRulesYaml(args.yaml)
@@ -1550,7 +1581,7 @@ export default function () {
       })
 
       registerRpc('rulesReset', async (args) => {
-        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
+        const repo = resolveRulesRepo(args)
         const scope = args && args.scope === 'repo' ? 'repo' : 'global'
         if (scope === 'repo') {
           // 重置仓库专属 = 删除仓库规则文件并显式回退全局（旧版是把内置默认写进
@@ -1573,9 +1604,7 @@ export default function () {
       // 切换当前仓库的生效规则来源。切到仓库专属时文件不存在则以当前生效规则为底
       // 创建（继承全局内容，便于直接编辑）；切回全局只改偏好、保留仓库文件不删，
       // 之后可随时再切回。
-      registerRpc('rulesSetScope', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('rulesSetScope', withRepo(async (repo, args) => {
         const scope = args && args.scope === 'repo' ? 'repo' : 'global'
         if (scope === 'repo') {
           const cur = await readRepoRules(repo)
@@ -1593,10 +1622,10 @@ export default function () {
           summary: tr(scope === 'repo' ? 'rulesScopeRepo' : 'rulesScopeGlobal'),
           ruleScope: scope, repoYaml: rr.txt, repoPath: rr.newPath, repoRuleExists: rr.txt !== null, effective
         })
-      })
+      }))
 
       registerRpc('rulesCopy', async (args) => {
-        const repo = repoOf(args && args.repoId) || { name: (args && args.repoName) || 'default', path: null }
+        const repo = resolveRulesRepo(args)
         const effective = await loadEffectiveRules(repo)
         const yaml = emitRulesYaml({ system_prompt: effective.system_prompt, user_context: effective.user_context })
         try {
@@ -1614,59 +1643,43 @@ export default function () {
         } catch (e) { return fail(fmt(tr('errCopy'), { e: e && e.message ? e.message : String(e) })) }
       })
 
-      registerRpc('stage', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      // ---- git 写操作 ----
+      registerRpc('stage', withRepo(async (repo, args) => {
         const files = ((args && args.files) || []).map(String).filter(Boolean)
         if (files.length === 0) return fail(tr('errNoFilesStage'))
         await audit({ op: 'stage', repo: repo.path, files: files.length })
         return await opStage(repo, files)
-      })
+      }))
 
-      registerRpc('unstage', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('unstage', withRepo(async (repo, args) => {
         const files = ((args && args.files) || []).map(String).filter(Boolean)
         if (files.length === 0) return fail(tr('errNoFilesUnstage'))
         await audit({ op: 'unstage', repo: repo.path, files: files.length })
         return await opUnstage(repo, files)
-      })
+      }))
 
-      registerRpc('discard', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('discard', withRepo(async (repo, args) => {
         const files = ((args && args.files) || []).map(String).filter(Boolean)
         if (files.length === 0) return fail(tr('errNoFilesDiscard'))
         const group = args && args.group === 'staged' ? 'staged' : args && args.group === 'untracked' ? 'untracked' : 'unstaged'
         await audit({ op: 'discard', repo: repo.path, group, files: files.length })
         return await opDiscard(repo, files, group)
-      })
+      }))
 
-      registerRpc('commit', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('commit', withRepo(async (repo, args) => {
         const files = (args && args.files) || []
         const message = String((args && args.message) || '').trim().slice(0, 64 * 1024)
         if (!message) return fail(tr('errNoMessage'))
         if (files.length === 0) return fail(tr('errNothingStaged'))
         return await runWriteOp('git.commit', repo, () => opCommit(repo, files, message), { files: files.length })
-      })
+      }))
 
-      registerRpc('push', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
-        return await runWriteOp('git.push', repo, () => opPush(repo))
-      })
+      registerRpc('push', withRepo((repo) => runWriteOp('git.push', repo, () => opPush(repo))))
 
-      registerRpc('pull', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
-        return await runWriteOp('git.pull', repo, () => opPull(repo))
-      })
+      registerRpc('pull', withRepo((repo) => runWriteOp('git.pull', repo, () => opPull(repo))))
 
-      registerRpc('branches', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      // ---- 分支 / stash / 历史查询与操作 ----
+      registerRpc('branches', withRepo(async (repo) => {
         const r = await gitRun(repo.path, ['for-each-ref', '--format=%(refname:short)%00%(HEAD)%00%(objectname:short)%00%(upstream:short)', 'refs/heads'], { maxBytes: 512 * 1024, timeoutMs: 30000 })
         if (r.code !== 0) return fail(fmt(tr('errBranches'), { e: (r.errText || r.text).slice(0, 200) }))
         const branches = []
@@ -1680,20 +1693,16 @@ export default function () {
           if (isCurrent) current = parts[0]
         }
         return ok({ current, branches })
-      })
+      }))
 
-      registerRpc('switchBranch', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('switchBranch', withRepo(async (repo, args) => {
         const branch = String((args && args.branch) || '').trim()
         const create = !!(args && args.create)
         if (!branch) return fail(tr('errNoBranchName'))
         return await runWriteOp('git.switch', repo, () => opSwitch(repo, branch, create))
-      })
+      }))
 
-      registerRpc('stashList', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('stashList', withRepo(async (repo) => {
         const r = await gitRun(repo.path, ['stash', 'list', '--format=%gd%00%H%00%s'], { maxBytes: 512 * 1024, timeoutMs: 30000 })
         if (r.code !== 0) return fail(fmt(tr('errStashList'), { e: (r.errText || r.text).slice(0, 200) }))
         const stashes = []
@@ -1703,36 +1712,20 @@ export default function () {
           if (parts.length >= 3) stashes.push({ ref: parts[0], hash: parts[1], message: parts.slice(2).join('') })
         }
         return ok({ stashes })
-      })
+      }))
 
-      registerRpc('stashPush', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
-        return await runWriteOp('git.stash', repo, () => opStashPush(repo, args && args.message))
-      })
+      registerRpc('stashPush', withRepo((repo, args) => runWriteOp('git.stash', repo, () => opStashPush(repo, args && args.message))))
 
-      registerRpc('stashPop', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
-        return await runWriteOp('git.stash-pop', repo, () => opStashPop(repo, args && args.ref))
-      })
+      registerRpc('stashPop', withRepo((repo, args) => runWriteOp('git.stash-pop', repo, () => opStashPop(repo, args && args.ref))))
 
-      registerRpc('reset', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('reset', withRepo(async (repo, args) => {
         const mode = args && args.mode === 'hard' ? 'hard' : 'soft'
         return await runWriteOp('git.reset', repo, () => opReset(repo, mode))
-      })
+      }))
 
-      registerRpc('clean', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
-        return await runWriteOp('git.clean', repo, () => opClean(repo))
-      })
+      registerRpc('clean', withRepo((repo) => runWriteOp('git.clean', repo, () => opClean(repo))))
 
-      registerRpc('log', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('log', withRepo(async (repo, args) => {
         // 分页读取：--topo-order + --skip/-n，供前端按滚动条动态加载（--graph 不支持 --skip）
         const skip = Math.max(0, Number(args && args.skip) || 0)
         const limit = Math.min(500, Math.max(20, Number(args && args.limit) || 200))
@@ -1749,11 +1742,9 @@ export default function () {
           entries.push({ hash: fields[0] || '', short: fields[1] || '', author: fields[2] || '', date: fields[3] || '', subject: fields[4] || '', refs: (fields[5] || '').trim(), parents: (fields[6] || '').split(' ').filter(Boolean) })
         }
         return ok({ entries, skip, hasMore: entries.length === limit })
-      })
+      }))
 
-      registerRpc('commitDetail', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('commitDetail', withRepo(async (repo, args) => {
         const hash = String((args && args.hash) || '').trim()
         if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) return fail(tr('errBadHash'))
         // message 与 stat 分开取：原先对单次 show 输出按 4000 字符硬切，
@@ -1766,7 +1757,7 @@ export default function () {
         if (show.code !== 0) return fail(fmt(tr('errCommitDetail'), { e: (show.errText || show.text).slice(0, 200) }))
         const mf = (meta.text || '').trim().split('\u001f')
         return ok({ message: (msgR.text || '').trim().slice(0, 4000), author: mf[0] || '', email: mf[1] || '', date: mf[2] || '', subject: mf[3] || '', stat: (show.text || '').trim().slice(0, 12000) })
-      })
+      }))
 
       // 提交的变更文件列表（历史行内展开用）：结构化 [{status, path, oldPath, adds, dels}]
       // - name-status（-z NUL 分隔）为顺序来源：普通记录 "状态\0路径\0"，
@@ -1775,9 +1766,7 @@ export default function () {
       //   重命名 "adds\tdels\t\0旧路径\0新路径\0"（路径段为空 + 两个 NUL 路径）
       // - --root 使根提交（无父）也能列出全部新增；-M 开启重命名检测
       // - 合并提交默认输出为空（无 combined 差异），前端显示「无文件变更」
-      registerRpc('commitFiles', async (args) => {
-        const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+      registerRpc('commitFiles', withRepo(async (repo, args) => {
         const hash = String((args && args.hash) || '').trim()
         if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) return fail(tr('errBadHash'))
         const [ns, num] = await Promise.all([
@@ -1821,7 +1810,7 @@ export default function () {
           }
         }
         return ok({ files })
-      })
+      }))
 
       console.log('[git-panel] Host 已就绪')
     }

@@ -1,5 +1,6 @@
-# 构建产物（由 npm run build 生成，install.mjs 会自动重新构建）
-lib/
+# 构建产物（由 npm run build 生成，install.mjs 会自动重新构建；仅根目录，
+# 不影响 scripts/lib/ 共享源码）
+/lib/
 
 # pnpm pack 产物
 *.tgz

@@ -5,7 +5,7 @@
  *   node scripts/install.mjs
  *   DSH_PROFILE=/path/to/profile node scripts/install.mjs   # 指定 profile
  *
- * 步骤（参照 dsh-pet install.sh 的复制式方案，不依赖 pnpm）：
+ * 步骤（复制式方案：构建产物直接复制进 profile，不依赖 pnpm）：
  *   1. 构建 lib/（确保产物最新）
  *   2. 复制 lib/ + package.json + cordis.patch.yml 到 <profile>/node_modules/@dsh-local/git-panel
  *   3. 在 <profile>/cordis.patch.yml 注册 `- insert:` 插件行（已注册则跳过，先备份）
@@ -14,20 +14,14 @@
  */
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isBundledInstalled, profileDir, RE_ENTRY_ID, RE_PKG_NAME, stripComment } from './lib/profile.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PKG_NAME = '@dsh-local/git-panel'
 const PKG_DIR = join('node_modules', ...PKG_NAME.split('/'))
 const ENTRY_ID = 'git-panel'
-
-function profileDir() {
-  if (process.env.DSH_PROFILE) return process.env.DSH_PROFILE
-  const home = process.env.DSH_HOME || join(homedir(), '.dsh')
-  return join(home, 'profiles', 'web')
-}
 
 function fail(msg) {
   console.error('✗ ' + msg)
@@ -62,24 +56,10 @@ const insertBlock = `# @dsh-local/git-panel - installed by scripts/install.mjs
         scanMaxDirs: 2000
         scanMaxRepos: 50
 `
-const stripComment = (s) => s.split('\n').filter((l) => {
-  const t = l.trim()
-  return t !== '' && !t.startsWith('#')
-}).join('\n')
-
 // 组合包方式（pnpm / `dsh plugin add`）的注册记录在 profile/package.json 的
 // dependencies / dsh.profile.bundles 里，与 patch 行二选一；两者共存会导致
 // loader 报 duplicate loader entry id
-let bundled = false
-const pkgJsonPath = join(profile, 'package.json')
-if (existsSync(pkgJsonPath)) {
-  try {
-    const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'))
-    const deps = pkg.dependencies || {}
-    const bundles = (pkg.dsh && pkg.dsh.profile && pkg.dsh.profile.bundles) || []
-    bundled = Object.prototype.hasOwnProperty.call(deps, PKG_NAME) || bundles.includes(PKG_NAME)
-  } catch { /* 解析失败按无冲突处理 */ }
-}
+const bundled = isBundledInstalled(join(profile, 'package.json'), PKG_NAME)
 
 if (existsSync(patch)) {
   const cur = readFileSync(patch, 'utf8')
@@ -87,8 +67,7 @@ if (existsSync(patch)) {
   // 幂等检测匹配结构化行（去注释后的 id/name 字段），避免文件中其它插件
   // 的注释或配置里恰好含 "git-panel" 字样时被误判为已注册；
   // 正则容忍前导缩进与单/双引号，以匹配本脚本写入的列表项格式
-  const registered = /^\s*-\s*id:\s*git-panel\s*$/m.test(clean) ||
-    /^\s*name:\s*['"]?@dsh-local\/git-panel['"]?\s*$/m.test(clean)
+  const registered = RE_ENTRY_ID.test(clean) || RE_PKG_NAME.test(clean)
   if (registered && bundled) {
     fail(`插件同时注册在 package.json（bundles/dependencies）与 cordis.patch.yml 中，` +
       `会导致 loader 报 duplicate loader entry id。请二选一清理：` +

@@ -12,26 +12,11 @@
  *   （本脚本会检测到该情况并给出提示）。
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { isBundledInstalled, profileDir, RE_ENTRY_ID, RE_PKG_NAME, stripComment } from './lib/profile.mjs'
 
 const PKG_NAME = '@dsh-local/git-panel'
 const PKG_DIR = join('node_modules', ...PKG_NAME.split('/'))
-// 结构化匹配（与 install.mjs 的幂等检测同口径）：仅命中本插件写入的 id/name
-// 字段行，避免其它插件的注释/配置中恰好含 "git-panel" 字样时被误判/误删。
-// m 标志兼容整文件与单行两种 test 用法（单行时 ^$ 锚点行为不变）。
-const RE_ENTRY_ID = /^\s*-\s*id:\s*git-panel\s*$/m
-const RE_PKG_NAME = /^\s*name:\s*['"]?@dsh-local\/git-panel['"]?\s*$/m
-const stripComment = (s) => s.split('\n').filter((l) => {
-  const t = l.trim()
-  return t !== '' && !t.startsWith('#')
-}).join('\n')
-
-function profileDir() {
-  if (process.env.DSH_PROFILE) return process.env.DSH_PROFILE
-  const home = process.env.DSH_HOME || join(homedir(), '.dsh')
-  return join(home, 'profiles', 'web')
-}
 
 const profile = profileDir()
 const dest = join(profile, PKG_DIR)
@@ -39,15 +24,7 @@ const patch = join(profile, 'cordis.patch.yml')
 const pkgJsonPath = join(profile, 'package.json')
 
 // 0) 检测 pnpm / dsh plugin 安装痕迹：profile/package.json 的依赖或 bundles 列表
-let pnpmInstalled = false
-if (existsSync(pkgJsonPath)) {
-  try {
-    const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'))
-    const deps = pkg.dependencies || {}
-    const bundles = (pkg.dsh && pkg.dsh.profile && pkg.dsh.profile.bundles) || []
-    pnpmInstalled = Object.prototype.hasOwnProperty.call(deps, PKG_NAME) || bundles.includes(PKG_NAME)
-  } catch { /* 解析失败则按复制式处理 */ }
-}
+const pnpmInstalled = isBundledInstalled(pkgJsonPath, PKG_NAME)
 
 // 1) 删除插件包（pnpm 安装时这里只是符号链接，删除链接本身不影响源仓库）
 if (existsSync(dest)) {
@@ -77,7 +54,10 @@ if (existsSync(patch)) {
         let j = i + 1
         while (j < lines.length) {
           const nxt = lines[j]
-          if (nxt.trim() === '' || nxt.startsWith(indent + '  ') || nxt.startsWith(indent + '-')) {
+          // 同缩进的新列表项是下一个块（可能是其它插件的 - insert:）的开始，
+          // 必须终止收集，否则相邻的其它插件块会被并入本块而遭误删
+          if (nxt.startsWith(indent + '-')) break
+          if (nxt.trim() === '' || nxt.startsWith(indent + '  ')) {
             block.push(nxt)
             j++
           } else break
