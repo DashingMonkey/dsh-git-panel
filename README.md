@@ -58,14 +58,6 @@ Diff 窗口：
 
 详细说明见[使用文档](docs/usage.md)；架构与源码结构见[架构文档](docs/architecture.md)。
 
-## 与 VS Code 的差异
-
-行为对齐 VS Code Source Control，仅以下不同：
-
-- 只能整文件暂存，不支持分块暂存（hunk staging）
-- 提交只针对已暂存文件；无暂存文件时提交按钮禁用，不会像 VS Code 那样自动提交全部更改
-- push 不弹凭据输入，无凭据/需 SSH 口令时直接失败并提示
-
 ## 许可证
 
 [MIT](LICENSE) © 2026 DashingMonkey
