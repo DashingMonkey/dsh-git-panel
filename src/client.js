@@ -115,8 +115,12 @@ body[data-ds-dark-theme] { --gp-border-1: rgba(255, 255, 255, .15); --gp-border-
    宿主 --dsw-alias-bg-overlay 在深色模式下偏浅，浮在深色内容上发灰。弹层统一走
    --gp-pop-bg（覆盖 .gp-menu / .gp-cd-pop / .gp-toast）：亮色原样跟随主题，
    深色用 color-mix 向黑压（宿主深色 token 实测 ≈ #61656A，偏浅），色调仍随主题。
-   观感深浅改下方取值即可。 */
-:root { --gp-pop-bg: var(--dsw-alias-bg-overlay); }
+   观感深浅改下方取值即可。
+   声明必须挂 body 而非 :root：var() 代换发生在声明元素上，而宿主把 --dsw-* token
+   定义在 body 层 —— 挂 :root 时代换取不到 token，--gp-pop-bg 解析为空值，亮色下
+   三个弹层背景全部回落成 transparent（深色恰因挂在 body[data-ds-dark-theme] 上
+   取得到 token 而幸免）。 */
+body { --gp-pop-bg: var(--dsw-alias-bg-overlay); }
 body[data-ds-dark-theme] { --gp-pop-bg: color-mix(in srgb, var(--dsw-alias-bg-overlay) 40%, #000); }
 .gp-panel, .gp-panel * { box-sizing: border-box; }
 /* UI 控件禁用文本选择（双击/拖动扩选在列表行上很丑）：
@@ -224,7 +228,12 @@ body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
 .gp-file-row.gp-file-sel, .gp-file-row.gp-file-active { background: var(--dsw-alias-interactive-bg-hover); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
 /* 危险操作按钮（放弃更改确认） */
 .gp-btn-danger { background: var(--dsw-alias-state-error-primary); border-color: var(--dsw-alias-state-error-primary); color: #ffffff; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.3); }
-.gp-btn-danger:hover:not(:disabled) { filter: brightness(1.12); }
+/* 深色错误色偏浅，白字不可读 —— 与 .gp-btn-primary / .gp-genmodel-selected 的深色覆盖同策略换深字 */
+body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
+/* 悬停必须重新声明背景：按钮同时挂 .gp-btn 基类，其 :hover 灰底（特异性 0,3,0）
+   会压过本类纯色底（0,1,0），灰底撞静态字色两主题都不可读。与 .gp-btn-primary
+   的 hover 同构：底色锁定错误色，仅 filter 提亮。 */
+.gp-btn-danger:hover:not(:disabled) { background: var(--dsw-alias-state-error-primary); filter: brightness(1.12); }
 /* 放弃更改确认弹窗：不可恢复提示 + 文件预览列表 */
 .gp-confirm-note { margin-top: 8px; font-size: 12.5px; }
 .gp-confirm-files { margin-top: 8px; max-height: 150px; overflow-y: auto; border: 1px solid var(--gp-border-1); border-radius: 6px; padding: 6px 9px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-all; }
@@ -364,8 +373,11 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 .gp-genmodel-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; border-radius: 7px; background: none; border: none; color: var(--dsw-alias-label-primary); font-size: 13px; cursor: pointer; }
 .gp-genmodel-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .gp-genmodel-item.gp-genmodel-selected { background: var(--dsw-alias-brand-primary); color: #ffffff; }
+/* 深色品牌主色偏浅，白字不可读 —— 与 .gp-btn-primary 的深色覆盖同策略换深字 */
+body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected { color: #16181d; }
 .gp-genmodel-meta { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-meta { color: rgba(255,255,255,.78); }
+body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-meta { color: rgba(22,24,29,.72); }
 .gp-genmodel-effort { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--gp-border-1); flex-wrap: wrap; }
 .gp-genmodel-effort-label { font-size: 12px; color: var(--dsw-alias-label-secondary); margin-right: 4px; }
 .gp-modal-head { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--gp-border-1); font-weight: 600; font-size: 14px; }
@@ -834,14 +846,17 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
       }
 
       // 左缘拖拽调宽（面板 / diff 抽屉共用）：begin() 由拖拽手柄 pointerdown 调用，
-      // move 期间按公式实时写宽度（含视口钳制，公式在调用方的 apply 里），松手持久化。
-      function useWidthDrag(apply, persist) {
+      // move 期间按公式实时写宽度（含视口钳制，公式在调用方的 apply 里），松手持久化，
+      // 并回调 onEnd 让调用方复位拖拽态（如激活样式、禁动画标记）。
+      function useWidthDrag(apply, persist, onEnd) {
         const resizeRef = React.useRef(false)
         const wRef = React.useRef(0)
         const applyRef = React.useRef(apply)
         const persistRef = React.useRef(persist)
+        const onEndRef = React.useRef(onEnd)
         applyRef.current = apply
         persistRef.current = persist
+        onEndRef.current = onEnd
         React.useEffect(() => {
           const onMove = (e) => {
             if (!resizeRef.current) return
@@ -851,10 +866,12 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
             if (!resizeRef.current) return
             resizeRef.current = false
             persistRef.current(wRef.current)
+            if (onEndRef.current) onEndRef.current()
           }
           window.addEventListener('pointermove', onMove)
           window.addEventListener('pointerup', onUp)
-          return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
+          window.addEventListener('pointercancel', onUp)
+          return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp) }
         }, [])
         return { begin: () => { resizeRef.current = true } }
       }
@@ -1135,7 +1152,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           setDrawerW((prev) => (prev === w ? prev : w))
           return w
         }
-        const widthDrag = useWidthDrag(dragApply, (w) => savePrefInt('gp-diff-w', 380, 2400, w))
+        const widthDrag = useWidthDrag(dragApply, (w) => savePrefInt('gp-diff-w', 380, 2400, w), () => setResizing(false))
 
         const parsed = React.useMemo(() => parseDiff(state.text), [state.text])
         // 分栏配对按 block 缓存（保留 @@ 分段头边界）；仅 split 模式惰性计算
@@ -2377,7 +2394,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
           store.set((st) => (st.panelW === w ? st : { ...st, panelW: w }))
           return w
         }
-        const widthDrag = useWidthDrag(dragApply, (w) => savePrefInt('gp-panel-w', 380, 2400, w))
+        const widthDrag = useWidthDrag(dragApply, (w) => savePrefInt('gp-panel-w', 380, 2400, w), () => setResizing(false))
 
         // 面板关闭时同步关闭 diff 抽屉，避免下次打开面板时残留上次的 diff 选择
         React.useEffect(() => { if (!s.panelOpen) setDiffSel(null) }, [s.panelOpen])
