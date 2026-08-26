@@ -220,6 +220,8 @@ body[data-ds-dark-theme] .gp-file-row:hover { box-shadow: 0 1px 4px rgba(0,0,0,.
    direction:rtl 让目录省略号落左侧，保留最深层目录（…lib/components）。 */
 .gp-file-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; max-width: 58%; color: #333333; }
 body[data-ds-dark-theme] .gp-file-name { color: #e6e6e6; }
+/* D（删除）类型文件：文件名加删除线，直观示意该文件将被删除（暂存/未暂存组均适用） */
+.gp-file-name.gp-file-name-del { text-decoration: line-through; }
 .gp-file-dir { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; direction: rtl; text-align: left; }
 .gp-file-orig { font-size: 12px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* ===== 多选（Ctrl/Shift）与激活（diff 打开）行高亮：选中盒 =====
@@ -2119,7 +2121,9 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
                 onClick: (e) => onRowClick(e, f, group)
               },
                 React.createElement('span', { className: 'gp-file-dot ' + gl.cls }, '•'),
-                React.createElement('span', { className: 'gp-file-name' }, base),
+                // D（删除）类型文件：文件名加删除线（见 .gp-file-name-del）；暂存/未暂存组均适用，
+                // 未跟踪组状态恒为 U 不受影响
+                React.createElement('span', { className: 'gp-file-name' + (gl.g === 'D' ? ' gp-file-name-del' : '') }, base),
                 dir ? React.createElement('span', { className: 'gp-file-dir' }, dir) : null,
                 f.orig ? React.createElement('span', { className: 'gp-file-orig', title: f.orig }, '← ' + (f.orig.replace(/\/+$/, '').split('/').pop() || f.orig)) : null,
                 React.createElement('span', { className: 'gp-spacer' }),
