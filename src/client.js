@@ -26,6 +26,11 @@
  *     选中文件（放弃仍弹确认）；选中行带品牌色选中盒；操作成功或移组后自动剪枝；
  *   - 面板左缘可拖拽调整整体宽度；点击标题折叠为右侧 44px 竖条、点击竖条展开
  *     （面板与竖条交叉滑入/滑出，动效播完才切换形态）；
+ *   - 布局模式（localStorage gp-layout，默认 dock）：dock 停靠 = 面板挂在对话右侧、
+ *     对话区收窄让位（:has() 选中 [data-shell-overlay] 父级 frame 加 padding-right，
+ *     :has() 缺失时 JS 几何写路径兜底，见 applyDockGeometry）；overlay 浮窗 = 覆盖
+ *     对话上方不改变布局（旧版行为）；窄视口(<1200px)停靠临时退化浮窗；
+ *     标题栏齿轮按钮打开「面板设置」弹窗即时切换；
  *   - 写操作（commit/pull/push/switch/stash/reset/clean）由用户点击直接执行
  *     （无审批门），仅 host 侧留审计记录。
  *   - 视图偏好（分栏/全文/抽屉宽/面板宽/折叠态）记忆在 localStorage，键名见各读写点。
@@ -434,41 +439,75 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
 /* 配对修改行的行内 word 级变化高亮（公共前后缀之外的中段） */
 .gp-diff-hl-del { background: rgba(248,81,73,.28); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent); border-radius: 2px; }
 .gp-diff-hl-add { background: rgba(46,160,67,.30); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 30%, transparent); border-radius: 2px; }
+/* ===== 布局模式：侧边栏停靠（dock）挤压对话区 =====
+   DSH 外壳 AppFrame 是三栏 grid（sidebar | center | details），CSS-module hash 类名
+   跨版本不稳定，但其 frame 内覆盖层带稳定属性 [data-shell-overlay]（ui-layout 产物）
+   —— frame 即它的直接父级。:has() 选中 frame 加 padding-right，grid 内容区收窄、
+   minmax(0,1fr) 的对话列自动让位（VS Code Secondary Sidebar 式 layout push）。
+   box-sizing 必须显式声明：frame 为 height:100% 的块级元素，若处 content-box，
+   水平 padding 会把总宽撑出视口（frame overflow:hidden 会裁掉左侧 sidebar）。
+   transition 必须合并声明：直接写 transition 会整体覆盖 frame 自带的
+   grid-template-columns 过渡。padding 动画期间逐帧重排 → 对话列跟随连续收缩。
+   :has() 不可用的环境由 JS 兜底（applyDockGeometry），本组属性照常由 body 驱动。 */
+body[data-gp-dock="1"] div:has(> [data-shell-overlay]) {
+  box-sizing: border-box;
+  padding-right: var(--gp-dock-w, 520px);
+  transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out), padding-right .22s cubic-bezier(.2, .8, .2, 1);
+}
+/* 拖拽调宽期间关闭 padding 过渡（对齐 .gp-noanim 惯例，避免跟手延迟） */
+body[data-gp-dock-noanim="1"] div:has(> [data-shell-overlay]) { transition: none !important; }
+/* 停靠态面板是布局的一部分：去投影（浮窗模式保留投影提供深度感） */
+body[data-gp-dock="1"] .gp-panel { box-shadow: none; }
+/* 停靠态 Toast 栈避开面板，落到面板左侧 */
+body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 14px); }
+/* ===== 布局模式设置弹窗：单选卡片（纯 CSS 圆形单选点，无嵌套交互元素） ===== */
+.gp-layout-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--gp-border-2); border-radius: 8px; padding: 11px 12px; cursor: pointer; color: var(--dsw-alias-label-primary); font-size: 13px; margin-bottom: 8px; font-family: inherit; }
+.gp-layout-opt:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.gp-layout-opt.gp-layout-on { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
+.gp-layout-radio { flex: none; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--gp-border-2); margin-top: 2px; position: relative; transition: border-color .12s ease; }
+.gp-layout-opt.gp-layout-on .gp-layout-radio { border-color: var(--dsw-alias-brand-primary); }
+.gp-layout-opt.gp-layout-on .gp-layout-radio::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--dsw-alias-brand-primary); }
+.gp-layout-opt-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gp-layout-opt-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.gp-layout-opt-desc { font-size: 12px; color: var(--dsw-alias-label-secondary); line-height: 1.5; }
+.gp-layout-default-badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 7px; border: 1px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); flex: none; line-height: 1.6; }
+.gp-layout-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; margin: 6px 0 0; }
 `)
 
-      // ============ 扁平 SVG 图标（16×16，stroke/fill + currentColor） ============
-      // p: 线性 path（stroke）；f: 填充 path（fill: currentColor，用于填充字形）；c: [cx, cy, r, filled?] 圆形元素
+      // ============ 图标集：VS Code codicons 官方填充字形（fill: currentColor） ============
+      // 来源：https://github.com/microsoft/vscode-codicons （许可 CC-BY-4.0）。
+      // 全套统一为 codicon 填充字形 —— 此前混用三种画法（codicon 细线填充的 refresh/discard、
+      // 1.5px 描边的 folder 等、实心填充的 gear/person），标题栏「重新扫描 / 打开工作空间 /
+      // 设置」粗细依次递减明显不齐；codicon 整套同网格设计，视觉粗细天然一致。
+      // 无完全对应官方图形的语义映射：pull→repo-pull、split→split-horizontal、
+      // unified→list-flat、fullDoc→file、sparkles→sparkle。
+      // vb：官方源非 16×16 网格时的 viewBox（仅 gear/settings-gear 为 24×24）。
+      // f: 填充 path；渲染器保留 p（stroke）/ c（circle）能力，供后续自定义图标使用。
       const ICONS = {
-        plus: { p: ['M8 3.5v9', 'M3.5 8h9'] },
-        minus: { p: ['M3.5 8h9'] },
-        chevronRight: { p: ['M6 3.5L10.5 8 6 12.5'] },
-        chevronDown: { p: ['M3.5 6L8 10.5 12.5 6'] },
-        close: { p: ['M4.2 4.2l7.6 7.6', 'M11.8 4.2l-7.6 7.6'] },
-        check: { p: ['M2.8 8.7l3.4 3.4L13.2 4.8'] },
-        // VS Code codicon「refresh」官方路径（填充字形，环形箭头）
-        // 来源：https://github.com/microsoft/vscode-codicons/blob/main/src/icons/refresh.svg
+        plus: { f: ['M8 1.5C8 1.22386 7.77614 1 7.5 1C7.22386 1 7 1.22386 7 1.5V7H1.5C1.22386 7 1 7.22386 1 7.5C1 7.77614 1.22386 8 1.5 8H7V13.5C7 13.7761 7.22386 14 7.5 14C7.77614 14 8 13.7761 8 13.5V8H13.5C13.7761 8 14 7.77614 14 7.5C14 7.22386 13.7761 7 13.5 7H8V1.5Z'] },
+        minus: { f: ['M1 7.5C1 7.22386 1.22386 7 1.5 7H13.5C13.7761 7 14 7.22386 14 7.5C14 7.77614 13.7761 8 13.5 8H1.5C1.22386 8 1 7.77614 1 7.5Z'] },
+        chevronRight: { f: ['M6.14601 3.14579C5.95101 3.34079 5.95101 3.65779 6.14601 3.85279L10.292 7.99879L6.14601 12.1448C5.95101 12.3398 5.95101 12.6568 6.14601 12.8518C6.34101 13.0468 6.65801 13.0468 6.85301 12.8518L11.353 8.35179C11.548 8.15679 11.548 7.83979 11.353 7.64478L6.85301 3.14479C6.65801 2.94979 6.34101 2.95079 6.14601 3.14579Z'] },
+        chevronDown: { f: ['M3.14598 5.85423L7.64598 10.3542C7.84098 10.5492 8.15798 10.5492 8.35298 10.3542L12.853 5.85423C13.048 5.65923 13.048 5.34223 12.853 5.14723C12.658 4.95223 12.341 4.95223 12.146 5.14723L7.99998 9.29323L3.85398 5.14723C3.65898 4.95223 3.34198 4.95223 3.14698 5.14723C2.95198 5.34223 2.95098 5.65923 3.14598 5.85423Z'] },
+        close: { f: ['M13.85 13.1502C14.05 13.3502 14.05 13.6602 13.85 13.8602C13.75 13.9602 13.62 14.0102 13.5 14.0102C13.38 14.0102 13.24 13.9602 13.15 13.8602L8 8.71023L2.85 13.8602C2.75 13.9602 2.62 14.0102 2.5 14.0102C2.38 14.0102 2.24 13.9602 2.15 13.8602C1.95 13.6602 1.95 13.3502 2.15 13.1502L7.3 8.00023L2.15 2.85023C1.95 2.65023 1.95 2.34023 2.15 2.14023C2.35 1.94023 2.66 1.94023 2.86 2.14023L8.01 7.29023L13.16 2.14023C13.36 1.94023 13.67 1.94023 13.87 2.14023C14.07 2.34023 14.07 2.65023 13.87 2.85023L8.72 8.00023L13.87 13.1502H13.85Z'] },
+        check: { f: ['M13.6572 3.13573C13.8583 2.9465 14.175 2.95614 14.3643 3.15722C14.5535 3.35831 14.5438 3.675 14.3428 3.86425L5.84277 11.8642C5.64597 12.0494 5.33756 12.0446 5.14648 11.8535L1.64648 8.35351C1.45121 8.15824 1.45121 7.84174 1.64648 7.64647C1.84174 7.45121 2.15825 7.45121 2.35351 7.64647L5.50976 10.8027L13.6572 3.13573Z'] },
         refresh: { f: ['M3 8C3 5.23858 5.23858 3 8 3C9.63527 3 11.0878 3.78495 12.0005 5H10C9.72386 5 9.5 5.22386 9.5 5.5C9.5 5.77614 9.72386 6 10 6H12.8904C12.8973 6.00014 12.9041 6.00014 12.911 6H13C13.2761 6 13.5 5.77614 13.5 5.5V2.5C13.5 2.22386 13.2761 2 13 2C12.7239 2 12.5 2.22386 12.5 2.5V4.03138C11.4009 2.78613 9.79253 2 8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14C11.1301 14 13.6999 11.6035 13.9756 8.54488C14.0003 8.26985 13.7975 8.0268 13.5225 8.00202C13.2474 7.97723 13.0044 8.1801 12.9796 8.45512C12.75 11.003 10.6079 13 8 13C5.23858 13 3 10.7614 3 8Z'] },
-        folder: { p: ['M2.2 4.4A1.6 1.6 0 0 1 3.8 2.8h2.4l1.3 1.8h4.7a1.6 1.6 0 0 1 1.6 1.6v5a1.6 1.6 0 0 1-1.6 1.6H3.8a1.6 1.6 0 0 1-1.6-1.6z'] },
-        ellipsis: { c: [[3.2, 8, 1.35, 1], [8, 8, 1.35, 1], [12.8, 8, 1.35, 1]] },
-        dot: { c: [[8, 8, 4, 1]] },
-        branch: { p: ['M5 5.5v5', 'M11 7.5c0 2-1.6 2.7-3.8 2.9'], c: [[5, 3.8, 1.7], [5, 12.2, 1.7], [11, 5.8, 1.7]] },
-        // 扁平小人（头 + 肩实心剪影）
-        person: { f: ['M8 8.2a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4z', 'M3.2 13.5v-.9c0-2 2.1-3.2 4.8-3.2s4.8 1.2 4.8 3.2v.9z'] },
-        gear: { p: ['M8 1.7v1.9', 'M8 12.4v1.9', 'M1.7 8h1.9', 'M12.4 8h1.9', 'M3.5 3.5l1.3 1.3', 'M11.2 11.2l1.3 1.3', 'M12.5 3.5l-1.3 1.3', 'M4.8 11.2l-1.3 1.3'], c: [[8, 8, 2.1]] },
-        sparkles: { p: ['M7.8 2l1.3 3.9 3.9 1.3-3.9 1.3L7.8 12.4 6.5 8.5 2.6 7.2l3.9-1.3z', 'M12.7 11.2l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z'] },
-        arrowUp: { p: ['M8 13.2V2.8', 'M3.6 6.8L8 2.4l4.4 4.4'] },
-        arrowDown: { p: ['M8 2.8v10.4', 'M3.6 9.2L8 13.6l4.4-4.4'] },
-        pull: { p: ['M8 2v7.4', 'M4.8 6.6L8 9.8l3.2-3.2', 'M2.6 13.4h10.8'] },
-        history: { p: ['M8 4.6V8l2.4 1.5'], c: [[8, 8, 6.2]] },
-        warning: { p: ['M8 2.2l6.3 10.8H1.7z', 'M8 6.6v3.2'], c: [[8, 12.1, 0.95, 1]] },
-        // VS Code codicon「discard」官方路径（填充字形：U 形回旋曲箭头，与 refresh 圆箭头明显区分）
-        // 来源：https://github.com/microsoft/vscode-codicons/blob/main/src/icons/discard.svg
+        folder: { f: ['M2 4.5V6H5.58579C5.71839 6 5.84557 5.94732 5.93934 5.85355L7.29289 4.5L5.93934 3.14645C5.84557 3.05268 5.71839 3 5.58579 3H3.5C2.67157 3 2 3.67157 2 4.5ZM1 4.5C1 3.11929 2.11929 2 3.5 2H5.58579C5.98361 2 6.36514 2.15804 6.64645 2.43934L8.20711 4H12.5C13.8807 4 15 5.11929 15 6.5V11.5C15 12.8807 13.8807 14 12.5 14H3.5C2.11929 14 1 12.8807 1 11.5V4.5ZM2 7V11.5C2 12.3284 2.67157 13 3.5 13H12.5C13.3284 13 14 12.3284 14 11.5V6.5C14 5.67157 13.3284 5 12.5 5H8.20711L6.64645 6.56066C6.36514 6.84197 5.98361 7 5.58579 7H2Z'] },
+        ellipsis: { f: ['M5 8C5 8.55229 4.55228 9 4 9C3.44772 9 3 8.55229 3 8C3 7.44772 3.44772 7 4 7C4.55228 7 5 7.44772 5 8ZM9 8C9 8.55229 8.55229 9 8 9C7.44772 9 7 8.55229 7 8C7 7.44772 7.44772 7 8 7C8.55229 7 9 7.44772 9 8ZM12 9C12.5523 9 13 8.55229 13 8C13 7.44772 12.5523 7 12 7C11.4477 7 11 7.44772 11 8C11 8.55229 11.4477 9 12 9Z'] },
+        dot: { f: ['M8 4C8.36719 4 8.72135 4.04818 9.0625 4.14453C9.40365 4.23828 9.72135 4.3724 10.0156 4.54688C10.3125 4.72135 10.582 4.93099 10.8242 5.17578C11.069 5.41797 11.2786 5.6875 11.4531 5.98438C11.6276 6.27865 11.7617 6.59635 11.8555 6.9375C11.9518 7.27865 12 7.63281 12 8C12 8.36719 11.9518 8.72135 11.8555 9.0625C11.7617 9.40365 11.6276 9.72266 11.4531 10.0195C11.2786 10.3138 11.069 10.5833 10.8242 10.8281C10.582 11.0703 10.3125 11.2786 10.0156 11.4531C9.72135 11.6276 9.40365 11.763 9.0625 11.8594C8.72135 11.9531 8.36719 12 8 12C7.63281 12 7.27865 11.9531 6.9375 11.8594C6.59635 11.763 6.27734 11.6276 5.98047 11.4531C5.6862 11.2786 5.41667 11.0703 5.17188 10.8281C4.92969 10.5833 4.72135 10.3138 4.54688 10.0195C4.3724 9.72266 4.23698 9.40365 4.14062 9.0625C4.04688 8.72135 4 8.36719 4 8C4 7.63281 4.04688 7.27865 4.14062 6.9375C4.23698 6.59635 4.3724 6.27865 4.54688 5.98438C4.72135 5.6875 4.92969 5.41797 5.17188 5.17578C5.41667 4.93099 5.6862 4.72135 5.98047 4.54688C6.27734 4.3724 6.59635 4.23828 6.9375 4.14453C7.27865 4.04818 7.63281 4 8 4Z'] },
+        branch: { f: ['M14 5.5C14 4.121 12.879 3 11.5 3C10.121 3 9 4.121 9 5.5C9 6.682 9.826 7.669 10.93 7.928C10.744 8.546 10.177 9 9.5 9H6.5C5.935 9 5.419 9.195 5 9.512V4.949C6.14 4.717 7 3.707 7 2.5C7 1.121 5.879 0 4.5 0C3.121 0 2 1.121 2 2.5C2 3.708 2.86 4.717 4 4.949V11.05C2.86 11.282 2 12.292 2 13.499C2 14.878 3.121 15.999 4.5 15.999C5.879 15.999 7 14.878 7 13.499C7 12.317 6.174 11.33 5.07 11.071C5.256 10.453 5.823 9.999 6.5 9.999H9.5C10.723 9.999 11.74 9.115 11.954 7.953C13.116 7.738 14 6.723 14 5.5ZM3 2.5C3 1.673 3.673 1 4.5 1C5.327 1 6 1.673 6 2.5C6 3.327 5.327 4 4.5 4C3.673 4 3 3.327 3 2.5ZM6 13.5C6 14.327 5.327 15 4.5 15C3.673 15 3 14.327 3 13.5C3 12.673 3.673 12 4.5 12C5.327 12 6 12.673 6 13.5ZM11.5 7C10.673 7 10 6.327 10 5.5C10 4.673 10.673 4 11.5 4C12.327 4 13 4.673 13 5.5C13 6.327 12.327 7 11.5 7Z'] },
+        person: { f: ['M6 5C6 3.89543 6.89543 3 8 3C9.10457 3 10 3.89543 10 5C10 6.10457 9.10457 7 8 7C6.89543 7 6 6.10457 6 5ZM5.49998 8L10.5 8C11.3284 8 12 8.67157 12 9.5C12 10.6161 11.541 11.5103 10.7879 12.1148C10.0466 12.7098 9.05308 13 8 13C6.94692 13 5.95342 12.7098 5.21215 12.1148C4.45897 11.5103 4 10.6161 4 9.5C4 8.67161 4.67156 8 5.49998 8ZM8 0C3.58172 0 0 3.58172 0 8C0 12.4183 3.58172 16 8 16C12.4183 16 16 12.4183 16 8C16 3.58172 12.4183 0 8 0ZM1 8C1 4.13401 4.13401 1 8 1C11.866 1 15 4.13401 15 8C15 11.866 11.866 15 8 15C4.13401 15 1 11.866 1 8Z'] },
+        gear: { f: ['M12 9C10.3425 9 9.00002 10.3425 9.00002 12C9.00002 13.6575 10.3425 15 12 15C13.6575 15 15 13.6575 15 12C15 10.3425 13.6575 9 12 9ZM12 13.5C11.172 13.5 10.5 12.828 10.5 12C10.5 11.172 11.172 10.5 12 10.5C12.828 10.5 13.5 11.172 13.5 12C13.5 12.828 12.828 13.5 12 13.5ZM21.8475 14.5725L19.9185 12.942C19.8675 12.8985 19.8195 12.8505 19.776 12.7995C19.332 12.279 19.3965 11.5005 19.9185 11.058L21.8475 9.4275C22.0395 9.2655 22.113 9.0045 22.0365 8.766C21.579 7.3545 20.823 6.06 19.8285 4.962C19.7085 4.83 19.5405 4.758 19.368 4.758C19.2975 4.758 19.227 4.77 19.1595 4.794L16.779 5.6415C16.716 5.664 16.65 5.682 16.584 5.694C16.509 5.7075 16.434 5.715 16.3605 5.715C15.7725 5.715 15.2505 5.298 15.141 4.701L14.6865 2.223C14.6415 1.977 14.451 1.782 14.205 1.7295C13.485 1.5765 12.7485 1.5 12.0015 1.5C11.2545 1.5 10.5165 1.578 9.79652 1.7295C9.55052 1.782 9.36002 1.977 9.31502 2.223L8.86202 4.701C8.85002 4.767 8.83202 4.8315 8.80952 4.8945C8.62802 5.4 8.15102 5.715 7.64102 5.715C7.50302 5.715 7.36202 5.691 7.22402 5.643L4.84352 4.7955C4.77602 4.7715 4.70402 4.7595 4.63502 4.7595C4.46252 4.7595 4.29452 4.8315 4.17452 4.9635C3.17852 6.0615 2.42402 7.356 1.96502 8.7675C1.88702 9.006 1.96202 9.267 2.15402 9.429L4.08302 11.0595C4.13402 11.103 4.18202 11.151 4.22552 11.202C4.66952 11.7225 4.60502 12.501 4.08302 12.9435L2.15402 14.574C1.96202 14.736 1.88852 14.997 1.96502 15.2355C2.42252 16.647 3.17852 17.9415 4.17452 19.0395C4.29452 19.1715 4.46252 19.2435 4.63502 19.2435C4.70552 19.2435 4.77602 19.2315 4.84352 19.2075L7.22402 18.36C7.28702 18.3375 7.35302 18.3195 7.41902 18.3075C7.49402 18.294 7.56902 18.288 7.64252 18.288C8.23052 18.288 8.75252 18.705 8.86202 19.302L9.31502 21.78C9.36002 22.026 9.55052 22.221 9.79652 22.2735C10.5165 22.4265 11.2545 22.503 12.0015 22.503C12.7485 22.503 13.4865 22.425 14.205 22.2735C14.451 22.221 14.6415 22.026 14.6865 21.78L15.141 19.302C15.153 19.236 15.171 19.1715 15.1935 19.1085C15.375 18.603 15.852 18.288 16.362 18.288C16.5 18.288 16.641 18.312 16.779 18.36L19.158 19.2075C19.227 19.2315 19.2975 19.2435 19.3665 19.2435C19.539 19.2435 19.707 19.1715 19.827 19.0395C20.823 17.9415 21.5775 16.647 22.035 15.2355C22.113 14.997 22.038 14.736 21.846 14.574L21.8475 14.5725ZM19.092 17.589L17.2815 16.944C16.9845 16.839 16.6755 16.785 16.362 16.785C15.2085 16.785 14.1705 17.514 13.782 18.5985C13.731 18.738 13.6935 18.882 13.6665 19.029L13.3215 20.9055C12.8865 20.9685 12.444 21 12.0015 21C11.559 21 11.1165 20.9685 10.68 20.904L10.3365 19.0275C10.098 17.727 8.96552 16.7835 7.64252 16.7835C7.48052 16.7835 7.31552 16.7985 7.14902 16.8285C7.00352 16.8555 6.86102 16.893 6.72002 16.9425L4.90952 17.5875C4.35752 16.896 3.91652 16.1385 3.59102 15.321L5.05202 14.0865C5.61152 13.614 5.95202 12.951 6.01202 12.222C6.07202 11.493 5.84252 10.785 5.36702 10.227C5.27102 10.1145 5.16452 10.008 5.05202 9.912L3.59102 8.6775C3.91652 7.86 4.35752 7.101 4.90952 6.411L6.72002 7.056C7.01702 7.161 7.32602 7.215 7.64102 7.215C8.79452 7.215 9.83252 6.486 10.221 5.4015C10.272 5.2605 10.3095 5.1165 10.3365 4.971L10.68 3.0945C11.1165 3.0315 11.559 2.9985 12.0015 2.9985C12.444 2.9985 12.8865 3.03 13.3215 3.093L13.665 4.9695C13.9035 6.27 15.036 7.2135 16.359 7.2135C16.521 7.2135 16.686 7.1985 16.851 7.1685C16.9965 7.1415 17.1405 7.104 17.2815 7.0545L19.092 6.4095C19.644 7.0995 20.085 7.8585 20.4105 8.676L18.951 9.9105C18.3915 10.383 18.0495 11.046 17.991 11.775C17.931 12.504 18.1605 13.2135 18.636 13.77C18.7335 13.884 18.8385 13.989 18.9525 14.085L20.4135 15.3195C20.088 16.137 19.647 16.896 19.095 17.586L19.092 17.589Z'], vb: '0 0 24 24' },
+        sparkles: { f: ['M5.46524 9.82962C5.62134 9.94037 5.80806 9.99974 5.99946 9.99948C6.19151 10.0003 6.37897 9.94082 6.53546 9.82948C6.69223 9.71378 6.81095 9.55398 6.87646 9.37048L7.22346 8.30348C7.3077 8.05191 7.44906 7.82327 7.63646 7.63548C7.82305 7.44851 8.05078 7.30776 8.30146 7.22448L9.38746 6.87148C9.56665 6.80759 9.72173 6.68989 9.83146 6.53448C9.94145 6.37908 10.0005 6.19337 10.0005 6.00298C10.0005 5.81259 9.94145 5.62689 9.83146 5.47148C9.71293 5.30613 9.54426 5.18339 9.35046 5.12148L8.28146 4.77548C8.02989 4.69238 7.80123 4.55163 7.61371 4.36447C7.4262 4.1773 7.28503 3.9489 7.20146 3.69748L6.84846 2.61348C6.78519 2.43423 6.66777 2.27908 6.51246 2.16948C6.35557 2.06133 6.16951 2.00342 5.97896 2.00342C5.78841 2.00342 5.60235 2.06133 5.44546 2.16948C5.28572 2.28196 5.16594 2.44237 5.10346 2.62748L4.74846 3.71748C4.66476 3.96155 4.52691 4.18351 4.34524 4.36673C4.16358 4.54996 3.9428 4.6897 3.69946 4.77548L2.61546 5.12648C2.43437 5.19048 2.27775 5.30937 2.16743 5.4666C2.05712 5.62383 1.99859 5.81155 2.00003 6.00361C2.00146 6.19568 2.06277 6.38251 2.17541 6.53808C2.28806 6.69364 2.44643 6.81019 2.62846 6.87148L3.69546 7.21848C3.94767 7.30297 4.17673 7.44506 4.36446 7.63348C4.41519 7.6837 4.46262 7.73715 4.50646 7.79348C4.62481 7.94615 4.71614 8.11797 4.77646 8.30148L5.12846 9.38148C5.19143 9.56222 5.30914 9.71886 5.46524 9.82962ZM4.00746 6.26448L3.15246 5.99948L4.01646 5.71848C4.41071 5.58184 4.76826 5.35637 5.06146 5.05948C5.35281 4.76039 5.57294 4.39943 5.70546 4.00348L5.97046 3.14448L6.25046 4.00648C6.38349 4.40638 6.60809 4.76969 6.90636 5.06744C7.20463 5.36519 7.56833 5.58915 7.96846 5.72148L8.84846 5.99048L7.98746 6.27048C7.58707 6.40272 7.22321 6.62691 6.92505 6.92507C6.62689 7.22324 6.4027 7.58709 6.27046 7.98748L6.00546 8.84448L5.72646 7.98548C5.63026 7.69329 5.48483 7.41968 5.29646 7.17648C5.22699 7.08766 5.15254 7.00286 5.07346 6.92248C4.7738 6.62366 4.4089 6.39842 4.00746 6.26448ZM10.5344 13.8515C10.6703 13.9477 10.8328 13.9994 10.9994 13.9995C11.1642 13.998 11.3245 13.9456 11.4584 13.8495C11.5979 13.751 11.7029 13.611 11.7584 13.4495L12.0064 12.6875C12.0595 12.529 12.1485 12.385 12.2664 12.2665C12.3837 12.148 12.5277 12.0592 12.6864 12.0075L13.4584 11.7555C13.6161 11.701 13.7528 11.5985 13.8494 11.4625C13.9227 11.3595 13.9706 11.2405 13.9891 11.1154C14.0076 10.9903 13.9962 10.8626 13.9558 10.7428C13.9154 10.623 13.8472 10.5144 13.7567 10.4261C13.6662 10.3377 13.5561 10.272 13.4354 10.2345L12.6714 9.98548C12.5132 9.93291 12.3695 9.8443 12.2514 9.72663C12.1334 9.60896 12.0444 9.46547 11.9914 9.30748L11.7394 8.53348C11.685 8.37623 11.5825 8.24011 11.4464 8.14448C11.3443 8.07153 11.2266 8.02359 11.1026 8.00453C10.9787 7.98547 10.8519 7.99582 10.7327 8.03475C10.6135 8.07369 10.5051 8.1401 10.4163 8.22865C10.3274 8.31719 10.2607 8.42538 10.2214 8.54448L9.97435 9.30648C9.92207 9.46413 9.83452 9.60777 9.71835 9.72648C9.60382 9.84272 9.46428 9.9313 9.31035 9.98548L8.53435 10.2385C8.41689 10.2793 8.31057 10.347 8.22382 10.4361C8.13708 10.5252 8.0723 10.6333 8.03464 10.7518C7.99698 10.8704 7.98746 10.996 8.00686 11.1189C8.02625 11.2417 8.07401 11.3583 8.14635 11.4595C8.24456 11.5993 8.38462 11.7044 8.54635 11.7595L9.30935 12.0065C9.46821 12.0599 9.61262 12.1492 9.73135 12.2675C9.84958 12.3857 9.93801 12.5304 9.98935 12.6895L10.2424 13.4635C10.2971 13.6199 10.3992 13.7555 10.5344 13.8515ZM9.62035 11.0585L9.44235 10.9995L9.62635 10.9355C9.92811 10.8305 10.2018 10.6578 10.4264 10.4305C10.6528 10.2015 10.8238 9.92374 10.9264 9.61848L10.9844 9.44048L11.0434 9.62148C11.1453 9.92819 11.3175 10.2069 11.5461 10.4353C11.7748 10.6638 12.0536 10.8357 12.3604 10.9375L12.5554 11.0005L12.3754 11.0595C12.068 11.1617 11.7888 11.3344 11.5601 11.5637C11.3314 11.7931 11.1596 12.0728 11.0584 12.3805L10.9994 12.5615L10.9414 12.3805C10.84 12.0721 10.6676 11.7919 10.4382 11.5623C10.2088 11.3326 9.92863 11.1601 9.62035 11.0585Z'] },
+        arrowUp: { f: ['M13.854 7.14576L8.85401 2.14576C8.65901 1.95076 8.34201 1.95076 8.14701 2.14576L3.14601 7.14576C2.95101 7.34076 2.95101 7.65776 3.14601 7.85276C3.34101 8.04776 3.65801 8.04776 3.85301 7.85276L7.99901 3.70676V13.4998C7.99901 13.7758 8.22301 13.9998 8.49901 13.9998C8.77501 13.9998 8.99901 13.7758 8.99901 13.4998V3.70676L13.145 7.85276C13.243 7.95076 13.371 7.99876 13.499 7.99876C13.627 7.99876 13.755 7.94976 13.853 7.85276C14.048 7.65776 14.048 7.34076 13.853 7.14576H13.854Z'] },
+        arrowDown: { f: ['M13.854 8.146C13.659 7.951 13.342 7.951 13.147 8.146L9.00096 12.292V2.5C9.00096 2.224 8.77696 2 8.50096 2C8.22496 2 8.00096 2.224 8.00096 2.5V12.293L3.85496 8.147C3.65996 7.952 3.34296 7.952 3.14796 8.147C2.95296 8.342 2.95296 8.659 3.14796 8.854L8.14796 13.854C8.24596 13.952 8.37396 14 8.50196 14C8.62996 14 8.75796 13.951 8.85596 13.854L13.856 8.854C14.051 8.659 14.051 8.342 13.856 8.147L13.854 8.146Z'] },
+        pull: { f: ['M4.85 6.15C4.755 6.05 4.627 6 4.5 6C4.372 6 4.245 6.05 4.15 6.15C4.05 6.245 4 6.373 4 6.5C4 6.627 4.05 6.755 4.15 6.85L7.15 9.85C7.245 9.95 7.372 10 7.5 10C7.628 10 7.755 9.95 7.85 9.85L10.85 6.85C10.95 6.755 11 6.628 11 6.5C11 6.372 10.95 6.245 10.85 6.15C10.755 6.05 10.627 6 10.5 6C10.373 6 10.245 6.05 10.15 6.15L8 8.29V1.5C8 1.22 7.78 1 7.5 1C7.22 1 7 1.22 7 1.5V8.29L4.85 6.15Z', 'M9.95 13H12.5C12.78 13 13 13.22 13 13.5C13 13.78 12.78 14 12.5 14H9.95C9.72 15.14 8.71 16 7.5 16C6.29 16 5.28 15.14 5.05 14H2.5C2.22 14 2 13.78 2 13.5C2 13.22 2.22 13 2.5 13H5.05C5.28 11.86 6.29 11 7.5 11C8.71 11 9.72 11.86 9.95 13ZM6.09 14C6.29 14.58 6.85 15 7.5 15C8.15 15 8.71 14.58 8.91 14C8.97 13.84 9 13.68 9 13.5C9 13.32 8.97 13.16 8.91 13C8.71 12.42 8.15 12 7.5 12C6.85 12 6.29 12.42 6.09 13C6.03 13.16 6 13.32 6 13.5C6 13.68 6.03 13.84 6.09 14Z'] },
+        history: { f: ['M7.99909 3C10.7605 3 12.9991 5.23858 12.9991 8C12.9991 10.7614 10.7605 13 7.99909 13C5.39117 13 3.2491 11.003 3.0195 8.45512C2.99471 8.1801 2.75167 7.97723 2.47664 8.00202C2.20161 8.0268 1.99875 8.26985 2.02353 8.54488C2.29916 11.6035 4.86898 14 7.99909 14C11.3128 14 13.9991 11.3137 13.9991 8C13.9991 4.68629 11.3128 2 7.99909 2C6.20656 2 4.59815 2.78613 3.49909 4.03138V2.5C3.49909 2.22386 3.27524 2 2.99909 2C2.72295 2 2.49909 2.22386 2.49909 2.5V5.5C2.49909 5.77614 2.72295 6 2.99909 6H3.08812C3.09498 6.00014 3.10184 6.00014 3.10868 6H5.99909C6.27524 6 6.49909 5.77614 6.49909 5.5C6.49909 5.22386 6.27524 5 5.99909 5H3.99863C4.91128 3.78495 6.36382 3 7.99909 3ZM7.99909 5.5C7.99909 5.22386 7.77524 5 7.49909 5C7.22295 5 6.99909 5.22386 6.99909 5.5V8.5C6.99909 8.77614 7.22295 9 7.49909 9H9.49909C9.77524 9 9.99909 8.77614 9.99909 8.5C9.99909 8.22386 9.77524 8 9.49909 8H7.99909V5.5Z'] },
+        warning: { f: ['M14.831 11.965L9.206 1.714C8.965 1.274 8.503 1 8 1C7.497 1 7.035 1.274 6.794 1.714L1.169 11.965C1.059 12.167 1 12.395 1 12.625C1 13.383 1.617 14 2.375 14H13.625C14.383 14 15 13.383 15 12.625C15 12.395 14.941 12.167 14.831 11.965ZM13.625 13H2.375C2.168 13 2 12.832 2 12.625C2 12.561 2.016 12.5 2.046 12.445L7.671 2.195C7.736 2.075 7.863 2 8 2C8.137 2 8.264 2.075 8.329 2.195L13.954 12.445C13.984 12.501 14 12.561 14 12.625C14 12.832 13.832 13 13.625 13ZM8.75 11.25C8.75 11.664 8.414 12 8 12C7.586 12 7.25 11.664 7.25 11.25C7.25 10.836 7.586 10.5 8 10.5C8.414 10.5 8.75 10.836 8.75 11.25ZM7.5 9V5.5C7.5 5.224 7.724 5 8 5C8.276 5 8.5 5.224 8.5 5.5V9C8.5 9.276 8.276 9.5 8 9.5C7.724 9.5 7.5 9.276 7.5 9Z'] },
         discard: { f: ['M3.00098 2.5C3.00098 2.22386 3.22483 2 3.50098 2C3.77712 2 4.00098 2.22386 4.00098 2.5V6.34262L7.17202 3.17157C8.73412 1.60948 11.2668 1.60948 12.8289 3.17157C14.391 4.73367 14.391 7.26633 12.8289 8.82843L7.80375 13.8536C7.60849 14.0488 7.2919 14.0488 7.09664 13.8536C6.90138 13.6583 6.90138 13.3417 7.09664 13.1464L12.1218 8.12132C13.2933 6.94975 13.2933 5.05025 12.1218 3.87868C10.9502 2.70711 9.0507 2.70711 7.87913 3.87868L4.75781 7H8.50098C8.77712 7 9.00098 7.22386 9.00098 7.5C9.00098 7.77614 8.77712 8 8.50098 8H3.60098C3.26961 8 3.00098 7.73137 3.00098 7.4V2.5Z'] },
-        // 分栏 diff（外框 + 中缝竖线）与单栏 diff（单个窄栏）：点击在两种视图间切换
-        split: { p: ['M2.5 3.5h11v9h-11z', 'M8 3.5v9'] },
-        unified: { p: ['M2.5 3.5h11v9h-11z', 'M4.7 6.2h6.6', 'M4.7 9h6.6'] },
-        // 全文视图（文档外框 + 满页文本行）：diff 抽屉头部「显示全文 / 仅显示变更」切换
-        fullDoc: { p: ['M3.5 2.5h9v11h-9z', 'M5.7 5.2h4.6', 'M5.7 8h4.6', 'M5.7 10.8h4.6'] }
+        // diff 抽屉头部视图切换：分栏 / 单栏 / 全文
+        split: { f: ['M12.5 1H3.5C2.122 1 1 2.122 1 3.5V12.5C1 13.878 2.122 15 3.5 15H12.5C13.878 15 15 13.878 15 12.5V3.5C15 2.122 13.878 1 12.5 1ZM2 12.5V3.5C2 2.673 2.673 2 3.5 2H7.5V14H3.5C2.673 14 2 13.327 2 12.5ZM14 12.5C14 13.327 13.327 14 12.5 14H8.5V2H12.5C13.327 2 14 2.673 14 3.5V12.5Z'] },
+        unified: { f: ['M2 3.5C2 3.224 2.224 3 2.5 3H10.5C10.776 3 11 3.224 11 3.5C11 3.776 10.776 4 10.5 4H2.5C2.224 4 2 3.776 2 3.5ZM13.5 6H2.5C2.224 6 2 6.224 2 6.5C2 6.776 2.224 7 2.5 7H13.5C13.776 7 14 6.776 14 6.5C14 6.224 13.776 6 13.5 6ZM9.5 9H2.5C2.224 9 2 9.224 2 9.5C2 9.776 2.224 10 2.5 10H9.5C9.776 10 10 9.776 10 9.5C10 9.224 9.776 9 9.5 9Z', 'M2.5 12H11.5C11.776 12 12 12.224 12 12.5C12 12.776 11.776 13 11.5 13H2.5C2.224 13 2 12.776 2 12.5C2 12.224 2.224 12 2.5 12Z'] },
+        fullDoc: { f: ['M5 1C3.89543 1 3 1.89543 3 3V13C3 14.1046 3.89543 15 5 15H11C12.1046 15 13 14.1046 13 13V5.41421C13 5.01639 12.842 4.63486 12.5607 4.35355L9.64645 1.43934C9.36514 1.15804 8.98361 1 8.58579 1H5ZM4 3C4 2.44772 4.44772 2 5 2H8V4.5C8 5.32843 8.67157 6 9.5 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V3ZM11.7929 5H9.5C9.22386 5 9 4.77614 9 4.5V2.20711L11.7929 5Z'] }
       }
       function Icon(props) {
         const spec = ICONS[props.name] || { p: [] }
@@ -485,14 +524,15 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
           key: 'c' + i, cx: c[0], cy: c[1], r: c[2],
           fill: c[3] ? 'currentColor' : 'none', stroke: c[3] ? 'none' : 'currentColor', strokeWidth: 1.4
         })))
-        return React.createElement('svg', { width: size, height: size, viewBox: '0 0 16 16', 'aria-hidden': true, style: { display: 'block', flex: '0 0 auto' } }, children)
+        return React.createElement('svg', { width: size, height: size, viewBox: spec.vb || '0 0 16 16', 'aria-hidden': true, style: { display: 'block', flex: '0 0 auto' } }, children)
       }
       const icon = (name, size, sw) => React.createElement(Icon, { name, size, sw })
 
       // localStorage 偏好读写：数值带 [min, max] 钳制（写入端同样钳制，防止读取端
-      // 丢弃越界值）；布尔以 '1'/'0' 记忆；异常（隐私模式等）静默退默认值。
+      // 丢弃越界值）；布尔以 '1'/'0' 记忆；字符串白名单校验；异常（隐私模式等）
+      // 静默退默认值。
       // 键名：gp-panel-w（面板宽）/ gp-diff-w（抽屉宽）/ gp-diff-split（分栏）/
-      // gp-diff-full（全文）/ gp-collapsed（折叠态）
+      // gp-diff-full（全文）/ gp-collapsed（折叠态）/ gp-layout（布局模式：dock 停靠 / overlay 浮窗）
       const prefInt = (key, min, max, def) => {
         try {
           const v = parseInt(window.localStorage.getItem(key), 10)
@@ -512,6 +552,17 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
       const savePrefBool = (key, v) => {
         try { window.localStorage.setItem(key, v ? '1' : '0') } catch (e) { /* ignore */ }
       }
+      // 字符串偏好：值必须落在白名单内（防手改 localStorage 注入任意值），否则退默认
+      const prefStr = (key, allowed, def) => {
+        try {
+          const v = window.localStorage.getItem(key)
+          if (allowed.indexOf(v) >= 0) return v
+        } catch (e) { /* ignore */ }
+        return def
+      }
+      const savePrefStr = (key, v) => {
+        try { window.localStorage.setItem(key, v) } catch (e) { /* ignore */ }
+      }
 
       function createStore(initial) {
         let state = initial
@@ -522,7 +573,8 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
           subscribe: (l) => { listeners.add(l); return () => listeners.delete(l) }
         }
       }
-      const store = createStore({ panelOpen: false, toasts: [], refreshTick: 0, lastOp: null, lastOpRepoId: null, panelW: prefInt('gp-panel-w', 380, 2400, 520), collapsed: prefBool('gp-collapsed', false) })
+      const LAYOUT_MODES = ['dock', 'overlay']
+      const store = createStore({ panelOpen: false, toasts: [], refreshTick: 0, lastOp: null, lastOpRepoId: null, panelW: prefInt('gp-panel-w', 380, 2400, 520), collapsed: prefBool('gp-collapsed', false), layout: prefStr('gp-layout', LAYOUT_MODES, 'dock') })
 
       // ============ 国际化：跟随 DSH 语言设置（locale.preference）自动切换 中文 / English ============
       const localeSvc = ctx.get('locale')
@@ -583,7 +635,11 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
           locating: '正在定位工作空间…', scanning: '正在扫描 Git 仓库…', scanFailed: '扫描失败',
           noWorkspace: '未打开工作空间', noRepos: '当前工作空间内未发现 Git 仓库。', resizeTitle: '拖拽调整面板宽度',
           toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel',
-          expandTitle: '展开 Git Panel'
+          expandTitle: '展开 Git Panel',
+          panelSettings: '面板设置',
+          modeDock: '侧边栏模式', modeDockDesc: '面板停靠在对话右侧，对话区域自动收窄让位（VS Code 侧边栏式）', modeDockBadge: '默认',
+          modeOverlay: '浮窗模式', modeOverlayDesc: '面板浮在对话区域上方，不改变对话布局（旧版行为）',
+          layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
         },
         en: {
           groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', history: 'History',
@@ -639,7 +695,11 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
           locating: 'Locating workspace…', scanning: 'Scanning for Git repositories…', scanFailed: 'Scan failed',
           noWorkspace: 'No workspace open', noRepos: 'No Git repositories found in the current workspace.', resizeTitle: 'Drag to resize the panel width',
           toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel',
-          expandTitle: 'Expand Git Panel'
+          expandTitle: 'Expand Git Panel',
+          panelSettings: 'Panel Settings',
+          modeDock: 'Side panel', modeDockDesc: 'The panel docks to the right of the conversation, which narrows to make room (VS Code-style sidebar)', modeDockBadge: 'Default',
+          modeOverlay: 'Floating overlay', modeOverlayDesc: 'The panel floats above the conversation without changing its layout (legacy behavior)',
+          layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'
         }
       }
       function tr(key) {
@@ -1510,9 +1570,9 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
         const FILEH = 26   // 展开区文件行行高（含内边距）
         const MAXVIS = 8   // 展开区可见文件数上限（超出转内部滚动）
 
-        const loadPage = React.useCallback(async (skip, append) => {
+        const loadPage = React.useCallback(async (skip, append, soft) => {
           if (append) setState((s) => ({ ...s, loadingMore: true }))
-          else setState((s) => ({ ...s, loading: true, error: '' }))
+          else if (!soft) setState((s) => ({ ...s, loading: true, error: '' }))
           try {
             const r = await callRpc('log', { repoId: repo.id, skip, limit: PAGE })
             if (r && r.ok) {
@@ -1523,6 +1583,20 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
         }, [repo.id])
 
         React.useEffect(() => { loadPage(0, false) }, [loadPage])
+
+        // 写操作（commit/push/pull 等）后定向刷新历史：订阅 refreshTick，命中本仓库时
+        // 静默重拉第一页（soft 模式不闪 loading）；滚动回顶部让新提交进入视口；
+        // 清空悬停详情缓存（push 后远程 ref 位置变化，旧缓存的 refs 已过期）
+        const s = useStore()
+        const lastTickRef = React.useRef(s.refreshTick)
+        React.useEffect(() => {
+          if (s.refreshTick === lastTickRef.current) return
+          lastTickRef.current = s.refreshTick
+          if (s.lastOpRepoId != null && s.lastOpRepoId !== repo.id) return
+          detailCache.current.clear()
+          if (listRef.current) listRef.current.scrollTop = 0
+          loadPage(0, false, true)
+        }, [s.refreshTick, s.lastOpRepoId, repo.id, loadPage])
 
         // 可变行高：展开行 = ROWH + 展开区高度（文件列表载入前后不同）。
         // heights/tops 前缀和/可视窗口二分定位/触底分页，见 useVariableRows
@@ -1864,6 +1938,35 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
             React.createElement('div', { className: 'gp-modal-foot' },
               React.createElement('button', { className: 'gp-btn', onClick: onClose, disabled: st.saving }, tr('cancel')),
               React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: save, disabled: st.saving || st.loading }, st.saving ? tr('saving') : tr('save')))))
+      }
+
+      // 布局模式设置弹窗：dock（停靠挤压对话）/ overlay（浮窗覆盖）二选一，点击卡片
+      // 即生效并记忆 localStorage（gp-layout），无保存按钮；底部提示窄视口自动回退。
+      // 单选点是纯 CSS 绘制的圆点（无 input 嵌套 button 的非法交互结构）。
+      function LayoutSettingsModal({ onClose }) {
+        const s = useStore()
+        const pick = (mode) => {
+          if (mode !== s.layout) {
+            store.set((st) => (st.layout === mode ? st : { ...st, layout: mode }))
+            savePrefStr('gp-layout', mode)
+          }
+          onClose()
+        }
+        const opt = (mode, titleKey, descKey, badgeKey) => React.createElement('button', {
+          className: 'gp-layout-opt' + (s.layout === mode ? ' gp-layout-on' : ''),
+          onClick: () => pick(mode)
+        },
+          React.createElement('span', { className: 'gp-layout-radio', 'aria-hidden': true }),
+          React.createElement('span', { className: 'gp-layout-opt-text' },
+            React.createElement('span', { className: 'gp-layout-opt-title' }, tr(titleKey), badgeKey ? React.createElement('span', { className: 'gp-layout-default-badge' }, tr(badgeKey)) : null),
+            React.createElement('span', { className: 'gp-layout-opt-desc' }, tr(descKey))))
+        return React.createElement('div', { className: 'gp-modal-backdrop', onClick: (e) => { e.stopPropagation(); onClose() } },
+          React.createElement('div', { className: 'gp-modal gp-modal-sm', onClick: (e) => e.stopPropagation() },
+            React.createElement('div', { className: 'gp-modal-head' }, icon('gear', 15), tr('panelSettings')),
+            React.createElement('div', { className: 'gp-modal-body' },
+              opt('dock', 'modeDock', 'modeDockDesc', 'modeDockBadge'),
+              opt('overlay', 'modeOverlay', 'modeOverlayDesc', null),
+              React.createElement('div', { className: 'gp-layout-hint' }, tr('layoutNarrowHint')))))
       }
 
       // 小型确认弹窗骨架（放弃更改 / Reset / Clean 共用）：warning 图标标题 +
@@ -2295,6 +2398,78 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
         return w
       }
 
+      // ===== 布局模式（dock 停靠 / overlay 浮窗）几何写路径 =====
+      // 主路径纯 CSS：body[data-gp-dock] 属性 + div:has(> [data-shell-overlay]) 选择器
+      // （见样式段注释）。:has() 不可用的老环境走 JS 兜底：直接给 frame
+      // （[data-shell-overlay] 的父级）写内联 padding-right。React 重渲染只 diff 自己
+      // 管理的 style 键，内联 paddingRight 不会被抹掉；frame 整体重挂载时由 body 级
+      // MutationObserver 重涂（DSH-better-sidebar「panel host + 几何写路径」路线的
+      // 极简版）。锚点 [data-shell-overlay] 属 ui-layout 产物，版本升级若移除需同步
+      // 更新此处与样式段选择器（better-sidebar 对 DSH 版本敏感的前车之鉴）。
+      let dockW = 520
+      let dockObserver = null
+      const DOCK_CSS_OK = (() => {
+        try { return typeof CSS !== 'undefined' && !!CSS.supports && CSS.supports('selector(div:has(*))') } catch (e) { return false }
+      })()
+      const dockFrameEl = () => {
+        try {
+          const layer = document.querySelector('[data-shell-overlay]')
+          return (layer && layer.parentElement) || null
+        } catch (e) { return null }
+      }
+      const dockInline = (w) => {
+        const el = dockFrameEl()
+        if (!el) return
+        if (el.style.paddingRight !== w + 'px') el.style.paddingRight = w + 'px'
+        if (el.style.boxSizing !== 'border-box') el.style.boxSizing = 'border-box'
+      }
+      const dockInlineClear = () => {
+        const el = dockFrameEl()
+        if (el) { el.style.removeProperty('padding-right'); el.style.removeProperty('box-sizing') }
+      }
+      // 停靠几何总入口：写 body 属性/CSS 变量（驱动 CSS 主路径），必要时启停 JS 兜底；
+      // active=false 清除全部痕迹（模式切换 / 面板关闭 / 卸载热重载共用）。
+      const applyDockGeometry = (active, w, noanim) => {
+        if (typeof document === 'undefined' || !document.body) return
+        dockW = w
+        const body = document.body
+        if (active) {
+          body.setAttribute('data-gp-dock', '1')
+          body.style.setProperty('--gp-dock-w', w + 'px')
+          if (noanim) body.setAttribute('data-gp-dock-noanim', '1')
+          else body.removeAttribute('data-gp-dock-noanim')
+        } else {
+          body.removeAttribute('data-gp-dock')
+          body.removeAttribute('data-gp-dock-noanim')
+          body.style.removeProperty('--gp-dock-w')
+        }
+        if (DOCK_CSS_OK) {
+          dockInlineClear()
+          if (dockObserver) { dockObserver.disconnect(); dockObserver = null }
+          return
+        }
+        if (active) {
+          dockInline(w)
+          if (!dockObserver && typeof MutationObserver !== 'undefined') {
+            dockObserver = new MutationObserver(() => { if (document.body.hasAttribute('data-gp-dock')) dockInline(dockW) })
+            dockObserver.observe(body, { childList: true, subtree: true })
+          }
+        } else {
+          if (dockObserver) { dockObserver.disconnect(); dockObserver = null }
+          dockInlineClear()
+        }
+      }
+
+      // 停靠几何同步组件（渲染 null）：DockSync 挂载期间每次渲染后同步
+      // 「是否停靠 + 面板宽 + 拖拽态」；卸载（面板关闭/插件卸载）时清除全部痕迹。
+      // active 由调用方计算（含折叠动画相位与窄视口守卫），此处只负责写。
+      function DockSync({ on, w, noanim }) {
+        React.useEffect(() => { applyDockGeometry(on, w, !!noanim) })
+        React.useEffect(() => () => { applyDockGeometry(false, 0, false) }, [])
+        return null
+      }
+
+
       function GitPanelMain({ useSessions, useWorkspaces }) {
         const s = useStore()
         const sessionId = typeof useSessions === 'function' ? useSessions((st) => (st && st.current) || undefined) : undefined
@@ -2313,6 +2488,16 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
           setDiffSel((prev) => (prev && prev.closing ? null : prev))
         }, [])
         const [resizing, setResizing] = React.useState(false)
+        // 面板设置弹窗（布局模式 dock/overlay）开关
+        const [settingsOpen, setSettingsOpen] = React.useState(false)
+        // 停靠窄视口守卫（见 dockActive 计算）：跟踪窗口宽度
+        const [innerW, setInnerW] = React.useState(() => (typeof window === 'undefined' ? 9999 : window.innerWidth))
+        React.useEffect(() => {
+          if (typeof window === 'undefined') return
+          const onRz = () => setInnerW(window.innerWidth)
+          window.addEventListener('resize', onRz)
+          return () => window.removeEventListener('resize', onRz)
+        }, [])
         // 折叠/展开滑动动效（见 useCollapseAnimation）：折叠开始前先关 diff 抽屉
         const { collAnim, startCollapse, startExpand } = useCollapseAnimation(() => setDiffSel(null))
         // 扫描请求序列号：丢弃过期响应，防止「初始无 root 的慢扫描」晚到覆盖
@@ -2428,6 +2613,7 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
                 pushToast('error', (r && r.error) || tr('openFolderUnavailable'))
               }).catch(failToast)
             } }, icon('folder')),
+            React.createElement('button', { className: 'gp-btn-icon', title: tr('panelSettings'), onClick: () => setSettingsOpen(true) }, icon('gear')),
             React.createElement('button', { className: 'gp-btn-icon', title: tr('close'), onClick: () => store.set((st) => ({ ...st, panelOpen: false })) }, icon('close'))))
 
         const body = React.createElement('div', { className: 'gp-body' },
@@ -2453,6 +2639,13 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
         const panelOff = collDir === 'collapse' ? collOn : collDir === 'expand' ? !collOn : false
         const railOff = collDir === 'collapse' ? !collOn : collDir === 'expand' ? collOn : false
 
+        // 停靠生效条件：偏好 dock + 视口 ≥1200px（窄窗临时退化浮窗——DSH 自身
+        // sidebar 在 1024px 也会自动折叠，停靠挤压在窄窗会把对话列压死）+ 面板可见
+        // （打开 + 未折叠 + 非离场相位）。面板离场（panelOff）即解除挤压，
+        // padding 过渡与面板滑出/滑入同步（同曲线同时长）。
+        const panelVisible = s.panelOpen && (!s.collapsed || collDir === 'expand')
+        const dockActive = s.layout === 'dock' && innerW >= 1200 && panelVisible && !panelOff
+
         const rail = (s.collapsed || collDir === 'collapse') ? React.createElement('button', {
           className: 'gp-rail', title: tr('expandTitle'),
           style: { transform: railOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'expand' ? 'none' : undefined },
@@ -2474,8 +2667,10 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
           React.createElement('div', { className: 'gp-main' }, body)) : null
 
         return React.createElement(React.Fragment, null,
+          React.createElement(DockSync, { on: dockActive, w: s.panelW, noanim: resizing }),
           panel,
           rail,
+          settingsOpen ? React.createElement(LayoutSettingsModal, { onClose: () => setSettingsOpen(false) }) : null,
           diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: s.panelW, onClose: finishCloseDiff, onRequestClose: requestCloseDiff }) : null)
       }
 
@@ -2503,7 +2698,11 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
       console.log('[git-panel] Client 已就绪')
 
       // 插件卸载/热重载时移除文件态注入的 <style>（动态包形态由宿主 styles 服务管理）
-      return () => { if (disposeCss) disposeCss() }
+      // 并清除停靠几何痕迹（body 属性/CSS 变量/兜底内联样式），防止页面残留挤压
+      return () => {
+        if (disposeCss) disposeCss()
+        applyDockGeometry(false, 0, false)
+      }
     }
   }
 }

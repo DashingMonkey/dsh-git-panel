@@ -9,6 +9,7 @@
 管理当前工作空间下的所有 Git 仓库，提供类 VS Code Source Control 的暂存/提交体验，并通过可配置的提交规则系统增强「AI 生成提交信息」能力。
 
 - 自动发现当前工作空间下的 Git 仓库（含嵌套仓库与 worktree），切换工作空间自动重扫
+- 侧边栏（停靠挤压对话区，默认）/ 浮窗两种布局模式即时切换，宽度可拖拽并记忆
 - Staged / Changes / Untracked 分组，悬停文件行即暂存，点击文件名展开只读 diff
 - LLM 按可配置规则生成 commit message（YAML 规则，全局 + 仓库级覆盖，修改即生效）
 - Git 历史图谱（SVG lane 布局 + 无限滚动）、Pull / 分支 / 推送 / Stash / Reset / Clean

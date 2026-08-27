@@ -24,6 +24,16 @@
   ↓↑ 落后/领先，以及刷新、Pull、分支、⋯ 更多按钮。
 - **面板宽度可拖拽调整**：拖动左缘实时改宽（380px ~ 96vw），宽度记忆在 localStorage
   （`gp-panel-w`）。
+- **布局模式（默认侧边栏停靠）**：标题栏齿轮按钮打开「面板设置」，两种模式即时切换，
+  偏好记忆在 localStorage（`gp-layout`）：
+  - **侧边栏模式（dock，默认）**：面板停靠在对话右侧，对话区域（含输入栏）自动收窄
+    让位，类似 VS Code 的 Chat 侧边栏。实现上通过宿主 AppFrame 覆盖层的稳定属性
+    `[data-shell-overlay]` 定位 frame，以 `padding-right` 挤压三栏 grid（`:has()`
+    选择器为主路径，不支持时自动退化为 JS 内联几何写路径）；窗口宽度 <1200px 时该
+    模式临时按浮窗显示（不清除偏好），拉宽后自动恢复。
+  - **浮窗模式（overlay）**：面板浮在对话区域上方、带投影，不改变对话布局（v1.0 行为）。
+  - 已知小取舍：停靠时宿主原生「工具详情」列的自动收起阈值与拖拽手柄位置按 frame
+    外框宽计算，会略偏一个面板宽（仅影响该列悬停手柄的显形位置，无功能影响）。
 - **中英双语**：跟随 DSH 语言设置（`locale` 服务 + `locale/change` 事件），Host 文案
   经 `setLocale` RPC 同步切换。
 - 所有图标为扁平 SVG 线性图标（stroke + currentColor，类 VS Code codicon），无 emoji。

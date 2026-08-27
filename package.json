@@ -1,6 +1,6 @@
 {
   "name": "@dsh-local/git-panel",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Git workspace panel for DSH Web: repo discovery, stage/commit like VS Code Source Control, AI-generated commit messages via configurable rules, history graph and diff preview",
   "private": true,
   "type": "module",
