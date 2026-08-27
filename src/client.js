@@ -30,6 +30,8 @@
  *     对话区收窄让位（:has() 选中 [data-shell-overlay] 父级 frame 加 padding-right，
  *     :has() 缺失时 JS 几何写路径兜底，见 applyDockGeometry）；overlay 浮窗 = 覆盖
  *     对话上方不改变布局（旧版行为）；窄视口(<1200px)停靠临时退化浮窗；
+ *     折叠竖条在宽视口复用同一挤压通道以 44px 让位（mini-dock，两种模式同此），
+ *     避免盖住对话列右缘（会话头部 Session log 按钮等）；窄视口竖条维持覆盖；
  *     标题栏齿轮按钮打开「面板设置」弹窗即时切换；
  *   - 写操作（commit/pull/push/switch/stash/reset/clean）由用户点击直接执行
  *     （无审批门），仅 host 侧留审计记录。
@@ -448,7 +450,12 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
    水平 padding 会把总宽撑出视口（frame overflow:hidden 会裁掉左侧 sidebar）。
    transition 必须合并声明：直接写 transition 会整体覆盖 frame 自带的
    grid-template-columns 过渡。padding 动画期间逐帧重排 → 对话列跟随连续收缩。
-   :has() 不可用的环境由 JS 兜底（applyDockGeometry），本组属性照常由 body 驱动。 */
+   :has() 不可用的环境由 JS 兜底（applyDockGeometry），本组属性照常由 body 驱动。
+   折叠竖条（.gp-rail，fixed 全高覆盖层）复用同一挤压通道：折叠稳态/收进相以
+   --gp-dock-w=44px（RAIL_W）顶替面板宽让位，否则竖条会盖住对话列右缘（会话头部
+   Session log 等操作、消息与输入框右段）。折叠稳态下面板不渲染，下面两条
+   data-gp-dock 附属规则（去投影、Toast 避让）只影响过渡相与 Toast 位置（折叠时
+   Toast 落到竖条左侧 58px 处，正合预期）。 */
 body[data-gp-dock="1"] div:has(> [data-shell-overlay]) {
   box-sizing: border-box;
   padding-right: var(--gp-dock-w, 520px);
@@ -637,8 +644,8 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel',
           expandTitle: '展开 Git Panel',
           panelSettings: '面板设置',
-          modeDock: '侧边栏模式', modeDockDesc: '面板停靠在对话右侧，对话区域自动收窄让位（VS Code 侧边栏式）', modeDockBadge: '默认',
-          modeOverlay: '浮窗模式', modeOverlayDesc: '面板浮在对话区域上方，不改变对话布局（旧版行为）',
+          modeDock: '侧边栏模式', modeDockDesc: '面板停靠在对话右侧，对话区域自动收窄让位', modeDockBadge: '默认',
+          modeOverlay: '浮窗模式', modeOverlayDesc: '面板浮在对话区域上方，不改变对话布局',
           layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
         },
         en: {
@@ -697,8 +704,8 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel',
           expandTitle: 'Expand Git Panel',
           panelSettings: 'Panel Settings',
-          modeDock: 'Side panel', modeDockDesc: 'The panel docks to the right of the conversation, which narrows to make room (VS Code-style sidebar)', modeDockBadge: 'Default',
-          modeOverlay: 'Floating overlay', modeOverlayDesc: 'The panel floats above the conversation without changing its layout (legacy behavior)',
+          modeDock: 'Side panel', modeDockDesc: 'The panel docks to the right of the conversation, which narrows to make room', modeDockBadge: 'Default',
+          modeOverlay: 'Floating overlay', modeOverlayDesc: 'The panel floats above the conversation without changing its layout',
           layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'
         }
       }
@@ -2408,6 +2415,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
       // 更新此处与样式段选择器（better-sidebar 对 DSH 版本敏感的前车之鉴）。
       let dockW = 520
       let dockObserver = null
+      // 折叠竖条宽度（px）：与样式段 .gp-rail 的 width 保持一致，折叠态并入停靠
+      // 挤压通道时以此值顶替面板宽（见 GitPanelMain 的 railPush/pushW）
+      const RAIL_W = 44
       const DOCK_CSS_OK = (() => {
         try { return typeof CSS !== 'undefined' && !!CSS.supports && CSS.supports('selector(div:has(*))') } catch (e) { return false }
       })()
@@ -2461,8 +2471,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
       }
 
       // 停靠几何同步组件（渲染 null）：DockSync 挂载期间每次渲染后同步
-      // 「是否停靠 + 面板宽 + 拖拽态」；卸载（面板关闭/插件卸载）时清除全部痕迹。
-      // active 由调用方计算（含折叠动画相位与窄视口守卫），此处只负责写。
+      // 「是否挤压 + 挤压宽（面板宽或折叠竖条 RAIL_W）+ 拖拽态」；卸载（面板关闭/
+      // 插件卸载）时清除全部痕迹。on/w 由调用方计算（含折叠动画相位与窄视口守卫），
+      // 此处只负责写。
       function DockSync({ on, w, noanim }) {
         React.useEffect(() => { applyDockGeometry(on, w, !!noanim) })
         React.useEffect(() => () => { applyDockGeometry(false, 0, false) }, [])
@@ -2646,6 +2657,17 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         const panelVisible = s.panelOpen && (!s.collapsed || collDir === 'expand')
         const dockActive = s.layout === 'dock' && innerW >= 1200 && panelVisible && !panelOff
 
+        // 折叠竖条并入同一挤压通道（mini-dock）：竖条是 fixed 全高覆盖层，不在布局上
+        // 让位会盖住对话列右缘（会话头部 Session log 按钮、消息与输入框右段）。折叠
+        // 稳态与收进相（rail 滑入）以 RAIL_W 顶替面板宽——padding 从 panelW 平滑收到
+        // 44px；展开相（rail 滑出）目标取 0：dock 模式下一帧即被 dockActive 接管
+        // （44→panelW），overlay 模式 padding 随竖条滑出同步收 0（若保持 44 到竖条
+        // 卸载，收尾帧会无过渡跳变）。宽视口守卫与 dock 同阈值；窄窗维持覆盖不挤压。
+        const railMounted = s.collapsed || collDir === 'collapse'
+        const railPush = railMounted && innerW >= 1200
+        const pushOn = dockActive || railPush
+        const pushW = dockActive ? s.panelW : (collDir === 'expand' ? 0 : RAIL_W)
+
         const rail = (s.collapsed || collDir === 'collapse') ? React.createElement('button', {
           className: 'gp-rail', title: tr('expandTitle'),
           style: { transform: railOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'expand' ? 'none' : undefined },
@@ -2667,7 +2689,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           React.createElement('div', { className: 'gp-main' }, body)) : null
 
         return React.createElement(React.Fragment, null,
-          React.createElement(DockSync, { on: dockActive, w: s.panelW, noanim: resizing }),
+          React.createElement(DockSync, { on: pushOn, w: pushW, noanim: resizing }),
           panel,
           rail,
           settingsOpen ? React.createElement(LayoutSettingsModal, { onClose: () => setSettingsOpen(false) }) : null,
