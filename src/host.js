@@ -21,6 +21,7 @@
  *   Host 服务与扫描配置 → 内置默认规则常量 → 协议与路径工具 → 国际化 →
  *   进程执行（git 执行层）→ 路径/审计 → YAML 迷你编解码 → 仓库注册表 →
  *   规则读写 → 仓库发现 → 扫描缓存 → git 状态 → diff（只读）→
+ *   图片预览（diff 抽屉二进制图片直读）→
  *   AI 生成提交信息 → 写操作 → RPC（Client → Host）
  */
 export default function () {
@@ -183,6 +184,7 @@ export default function () {
           errStash: 'stash 失败: {e}', errStashPop: 'stash pop 失败: {e}',
           errReset: 'reset 失败: {e}', errClean: 'clean 失败: {e}',
           errDiff: 'diff 失败: {e}', noDiff: '（无差异）', fullTruncated: '……（文件过大，全文视图已截断）',
+          errBadPath: '非法路径', imgNotImage: '不是可预览的图片',
           errStatus: '读取状态失败: {e}',
           errNoLlm: '未找到可用的 LLM provider/model', errEmptyGen: '模型未产出内容', errGenAborted: '生成被终止: {m}',
           errGenTruncated: '生成被截断（token 额度不足），请重试',
@@ -225,6 +227,7 @@ export default function () {
           errStash: 'stash failed: {e}', errStashPop: 'stash pop failed: {e}',
           errReset: 'reset failed: {e}', errClean: 'clean failed: {e}',
           errDiff: 'diff failed: {e}', noDiff: '(no differences)', fullTruncated: '...(file too large, full view truncated)',
+          errBadPath: 'Invalid path', imgNotImage: 'Not a previewable image',
           errStatus: 'Failed to read status: {e}',
           errNoLlm: 'No LLM provider/model available', errEmptyGen: 'Model produced no output', errGenAborted: 'Generation aborted: {m}',
           errGenTruncated: 'Generation truncated (token budget exhausted), please retry',
@@ -311,6 +314,55 @@ export default function () {
 
       function gitRun(repoPath, args, opts) {
         return spawnRaw(['git', '-c', 'core.quotepath=false', '-c', 'color.ui=false', '-c', 'core.pager=cat'].concat(args), repoPath, opts)
+      }
+
+      // stdout 原始字节收集（pipe 模式）：cat-file blob 输出的图片字节不能经
+      // collect 模式（readFrom 只产 UTF-8 文本，二进制必损坏），改用 pipe 模式
+      // 直接消费原始 Readable。聚满 maxBytes 即视为超限异常，终止进程树。
+      // 返回 { code, signal, bytes, errText }；文件态运行于完整 Node 环境，
+      // 动态包沙箱若不提供流对象/Buffer 则由调用方捕获降级。
+      function spawnRawBytes(argv, cwd, opts) {
+        return new Promise((resolve, reject) => {
+          opts = opts || {}
+          let settled = false
+          let handle = null
+          let disposeTimer = null
+          const finish = (v) => { if (!settled) { settled = true; if (disposeTimer) disposeTimer(); resolve(v) } }
+          const failP = (e) => { if (!settled) { settled = true; if (disposeTimer) disposeTimer(); if (handle) { try { handle.terminate() } catch (err) {} } reject(e) } }
+          try {
+            handle = subprocess.spawn({
+              argv,
+              cwd,
+              env: { GIT_TERMINAL_PROMPT: '0' },
+              stdio: {
+                stdin: 'ignore',
+                stdout: 'pipe',
+                stderr: { maxBytes: 128 * 1024 }
+              },
+              graceMs: 10000
+            })
+          } catch (e) { failP(e); return }
+          if (timer) disposeTimer = timer.timeout(() => failP(new Error(fmt(tr('errTimeout'), { ms: opts.timeoutMs || 90000, c: argv.join(' ').slice(0, 120) }))), opts.timeoutMs || 90000)
+          try {
+            const stdout = handle.stdout
+            if (!stdout || typeof stdout.on !== 'function') { failP(new Error('subprocess pipe mode unavailable')); return }
+            const chunks = []
+            let total = 0
+            const cap = opts.maxBytes || 16 * 1024 * 1024
+            stdout.on('data', (c) => {
+              total += c.length
+              if (total > cap) { failP(new Error('binary output exceeds cap')); return }
+              chunks.push(c)
+            })
+            stdout.on('error', failP)
+            handle.done.then((outcome) => {
+              try {
+                const err = handle.collected.stderr ? handle.collected.stderr.readFrom(0) : { text: '' }
+                finish({ code: outcome.exitCode, signal: outcome.signal, bytes: concatChunks(chunks, total), errText: err.text || '' })
+              } catch (e) { failP(e) }
+            }, failP)
+          } catch (e) { failP(e) }
+        })
       }
 
       // 批量文件参数统一走 --pathspec-from-file=-（NUL 分隔 + stdin），
@@ -972,6 +1024,76 @@ export default function () {
         return ok({ text: capFullText(text, full) || tr('noDiff'), kind: group })
       }
 
+      // ============ 图片预览（diff 抽屉对二进制图片直读） ============
+      // 版本语义（旧版 revspec / 新版来源）：
+      //   untracked：无旧版；新版 = 工作区文件
+      //   unstaged ：旧版 = index(:path)；新版 = 工作区文件（工作区已删除时无新版）
+      //   staged   ：旧版 = HEAD:path；新版 = index(:path)（rename 旧版在 orig 路径）
+      //   commit   ：旧版 = hash^:path（新增文件/根提交无旧版）；新版 = hash:path
+      // 工作区文件走 fs.readBytes；git 对象走 cat-file blob（spawnRawBytes 收原始
+      // 字节）。单图上限 IMAGE_MAX_BYTES（RPC 通道按 base64 文本传 data URL，
+      // 8MB → ~10.7MB 字符串，远低于通道 300MB 上限）；超限返回 oversize 标记，
+      // 由前端提示而非传坏图。任何读取异常一律归为 image:null（前端显示无此版本）。
+      const IMAGE_MAX_BYTES = 8 * 1024 * 1024
+      const IMAGE_MIMES = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', svg: 'image/svg+xml'
+      }
+      function imageMime(path) {
+        const m = /\.([a-z0-9]+)$/i.exec(String(path || ''))
+        return m ? (IMAGE_MIMES[m[1].toLowerCase()] || null) : null
+      }
+      // 字节 → base64：文件态有 Buffer；动态包沙箱可能没有，退回分块拼 binary string 走 btoa
+      function bytesToBase64(bytes) {
+        if (typeof Buffer !== 'undefined' && Buffer.from) return Buffer.from(bytes).toString('base64')
+        let bin = ''
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + 0x8000, bytes.length)))
+        }
+        return btoa(bin)
+      }
+      function concatChunks(chunks, total) {
+        if (typeof Buffer !== 'undefined' && Buffer.concat) return Buffer.concat(chunks)
+        const out = new Uint8Array(total)
+        let off = 0
+        for (let i = 0; i < chunks.length; i++) { out.set(chunks[i], off); off += chunks[i].length }
+        return out
+      }
+      async function imageFromGit(repo, revspec, mime) {
+        try {
+          const s = await gitRun(repo.path, ['cat-file', '-s', revspec], { maxBytes: 4096, timeoutMs: 30000 })
+          if (s.code !== 0) return { image: null }
+          const size = parseInt((s.text || '').trim(), 10)
+          if (!isFinite(size) || size < 0) return { image: null }
+          if (size > IMAGE_MAX_BYTES) return { image: null, oversize: true, size }
+          const r = await spawnRawBytes(['git', '-c', 'core.quotepath=false', '-c', 'color.ui=false', '-c', 'core.pager=cat', 'cat-file', 'blob', revspec], repo.path, { maxBytes: IMAGE_MAX_BYTES + 4096, timeoutMs: 60000 })
+          if (r.code !== 0 || !r.bytes || !r.bytes.length) return { image: null }
+          return { image: { dataUrl: 'data:' + mime + ';base64,' + bytesToBase64(r.bytes), bytes: size } }
+        } catch (e) { return { image: null } }
+      }
+      async function imageFromWorktree(repo, path, mime) {
+        try {
+          if (path.endsWith('/')) return { image: null }
+          const fullPath = joinPath(repo.path, path)
+          const target = await fs.resolve(fullPath)
+          const info = target ? await fs.stat(target) : null
+          if (!info || info.type !== 'file') return { image: null }
+          if (info.size > IMAGE_MAX_BYTES) return { image: null, oversize: true, size: info.size }
+          const bytes = await fs.readBytes(target, undefined, IMAGE_MAX_BYTES + 1)
+          if (!bytes || !bytes.length) return { image: null }
+          return { image: { dataUrl: 'data:' + mime + ';base64,' + bytesToBase64(bytes), bytes: info.size } }
+        } catch (e) { return { image: null } }
+      }
+      // git 仓库内相对路径健全性：commit 组的 orig（rename 旧路径）来自前端，进
+      // revspec 前做白名单式校验（无反斜杠/绝对前缀/空、.、.. 分段——git 树路径
+      // 本就不含这些；工作区分组的 path 另有变更集成员校验兜底）
+      function saneRepoPath(p) {
+        if (!p || typeof p !== 'string' || p.length > 1024 || p.indexOf('\\') >= 0 || p.startsWith('/')) return null
+        const segs = p.split('/')
+        for (let i = 0; i < segs.length; i++) if (!segs[i] || segs[i] === '.' || segs[i] === '..') return null
+        return p
+      }
+
       // ============ AI 生成提交信息 ============
       // 生成 token 预算：推理模型（reasoning）会先思考再输出正文，正文需要独立额度。
       // 8000 只是上限（正常 commit message 只花几百），并按模型声明的 maxTokens 自动收窄。
@@ -1497,6 +1619,45 @@ export default function () {
         if (!chk.ok) return chk
         await audit({ op: 'diff', repo: repo.path, file: args.path, group })
         return await fileDiff(repo, args.path, group, null, args.full === true)
+      }))
+
+      // 图片预览（diff 抽屉）：按 side（old/new）返回对应版本图片的 data URL。
+      // 校验口径与 fileDiff 完全一致：commit 组 hash 格式校验（revspec 读对象的
+      // 暴露面与 fileDiff 的 `--` pathspec 同类，见上方注释）；工作区组 path 必须
+      // 属于当前变更集对应分组（checkFilesInGroups），rename 的旧版路径取服务端
+      // status 的 orig（权威数据，不信任前端传参）。
+      registerRpc('imageBlob', withRepo(async (repo, args) => {
+        if (!args || typeof args.path !== 'string' || !args.path) return fail(tr('errNoPath'))
+        const mime = imageMime(args.path)
+        if (!mime) return fail(tr('imgNotImage'))
+        const side = args.side === 'old' ? 'old' : 'new'
+        if (args.group === 'commit') {
+          const hash = String(args.hash || '').trim()
+          if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) return fail(tr('errBadHash'))
+          const p = saneRepoPath(side === 'old' ? (args.orig || args.path) : args.path)
+          if (!p) return fail(tr('errBadPath'))
+          await audit({ op: 'image', repo: repo.path, file: args.path, group: 'commit', hash, side })
+          return ok(await imageFromGit(repo, (side === 'old' ? hash + '^' : hash) + ':' + p, mime))
+        }
+        const group = args.group === 'staged' ? 'staged' : args.group === 'untracked' ? 'untracked' : 'unstaged'
+        const chk = await checkFilesInGroups(repo, [args.path], [group], 'errNotChanged')
+        if (!chk.ok) return chk
+        await audit({ op: 'image', repo: repo.path, file: args.path, group, side })
+        if (side === 'old') {
+          // 未跟踪文件没有旧版；旧版按组取 index（unstaged）或 HEAD（staged），
+          // rename 旧路径以服务端 status 记录为准
+          if (group === 'untracked') return ok({ image: null })
+          const entry = chk.status[group].find((f) => f.path === args.path)
+          const oldPath = saneRepoPath(entry && entry.orig ? entry.orig : args.path)
+          if (!oldPath) return ok({ image: null })
+          return ok(await imageFromGit(repo, (group === 'staged' ? 'HEAD:' : ':') + oldPath, mime))
+        }
+        if (group === 'staged') {
+          const p = saneRepoPath(args.path)
+          if (!p) return ok({ image: null })
+          return ok(await imageFromGit(repo, ':' + p, mime))
+        }
+        return ok(await imageFromWorktree(repo, args.path, mime))
       }))
 
       // ---- AI 生成提交信息 ----

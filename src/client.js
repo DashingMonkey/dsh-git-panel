@@ -21,6 +21,10 @@
  *     模式展示整个文件（改动行照常高亮、其余作上下文）；滚动条内侧 overview ruler
  *     红/绿色块按文档比例标出增删位置（悬停加宽、点击跳转居中）；左缘可拖拽调宽，
  *     Esc / 点遮罩关闭，开/关均为滑入/滑出动效（双 rAF 入场防首帧闪现）；
+ *   - diff 抽屉图片预览：图片扩展名（png/jpg/gif/webp 等）改调 imageBlob 取旧/新两版
+ *     data URL 并排自适应展示；点击任一图片进全屏 lightbox（1:1 原始尺寸、超出屏幕
+ *     可滚动、棋盘格透明底、左右方向键切换新旧版本）；标签显示实测像素与文件大小；
+ *     单图 8MB 上限；
  *   - 文件行多选：Ctrl/⌘+点击增删、Shift+点击按可见顺序范围选择（按仓库隔离），
  *     修饰键点击不切换 diff；多选后点任一选中行的 放弃/暂存/取消暂存 即作用于全部
  *     选中文件（放弃仍弹确认）；选中行带品牌色选中盒；操作成功或移组后自动剪枝；
@@ -441,6 +445,34 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
 /* 配对修改行的行内 word 级变化高亮（公共前后缀之外的中段） */
 .gp-diff-hl-del { background: rgba(248,81,73,.28); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 28%, transparent); border-radius: 2px; }
 .gp-diff-hl-add { background: rgba(46,160,67,.30); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 30%, transparent); border-radius: 2px; }
+/* ===== diff 抽屉：图片预览模式 =====
+   棋盘格透明底（两层 45° 渐变拼 16px 格）供 png/gif/webp 透明区域可见；
+   并排缩略视图自适应宽度，点击任一图片进全屏 lightbox 看 1:1 原始尺寸。 */
+:root { --gp-checker: linear-gradient(45deg, rgba(128,128,128,.16) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.16) 75%), linear-gradient(45deg, rgba(128,128,128,.16) 25%, transparent 25%, transparent 75%, rgba(128,128,128,.16) 75%); }
+.gp-img-wrap { padding: 12px; }
+.gp-img-row { display: flex; gap: 10px; align-items: flex-start; }
+.gp-img-row-one .gp-img-cell { flex: 1 1 auto; max-width: 100%; }
+.gp-img-cell { flex: 1 1 50%; min-width: 0; }
+.gp-img-label { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 6px; font-size: 11.5px; color: var(--dsw-alias-label-secondary); min-width: 0; }
+.gp-img-tag { flex: none; font-weight: 700; font-size: 10.5px; line-height: 1.7; padding: 0 6px; border-radius: 4px; }
+.gp-img-tag-old { color: var(--dsw-alias-state-error-primary); background: rgba(248,81,73,.14); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent); }
+.gp-img-tag-new { color: var(--dsw-alias-state-success-primary); background: rgba(46,160,67,.16); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent); }
+.gp-img-dim { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.gp-img-note { padding: 8px 10px; border: 1px dashed var(--gp-border-1); border-radius: 6px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 1.6; background: var(--dsw-alias-bg-layer-2); overflow-wrap: anywhere; }
+.gp-img-box { border: 1px solid var(--gp-border-1); border-radius: 6px; padding: 8px; display: flex; justify-content: center; background-color: var(--dsw-alias-bg-layer-2); background-image: var(--gp-checker); background-size: 16px 16px; background-position: 0 0, 8px 8px; cursor: zoom-in; }
+.gp-img-box img { max-width: 100%; height: auto; display: block; }
+/* 全屏 lightbox：fixed 覆盖层（z-index 高于 modal 400，低于 toast 500）；
+   图片 1:1 原始尺寸（max-width:none），小于屏幕时 flex+margin:auto 居中、
+   超出时滚动容器滚动；棋盘格底贯穿；顶部信息条含版本徽标与关闭按钮 */
+.gp-lightbox { position: fixed; inset: 0; z-index: 420; background: rgba(0,0,0,.62); display: flex; flex-direction: column; }
+.gp-lightbox-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; color: #fff; }
+.gp-lightbox-head .gp-img-dim { color: rgba(255,255,255,.72); }
+.gp-lightbox-switch { font-size: 11.5px; color: rgba(255,255,255,.66); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gp-lightbox-close { margin-left: auto; flex: none; }
+.gp-lightbox-close button { background: rgba(255,255,255,.14); border: none; border-radius: 6px; color: #fff; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.gp-lightbox-close button:hover { background: rgba(255,255,255,.26); }
+.gp-lightbox-stage { flex: 1; min-height: 0; overflow: auto; display: flex; background-image: var(--gp-checker); background-size: 16px 16px; background-position: 0 0, 8px 8px; }
+.gp-lightbox-stage img { display: block; max-width: none; width: auto; height: auto; margin: auto; }
 /* ===== 布局模式：侧边栏停靠（dock）挤压对话区 =====
    DSH 外壳 AppFrame 是三栏 grid（sidebar | center | details），CSS-module hash 类名
    跨版本不稳定，但其 frame 内覆盖层带稳定属性 [data-shell-overlay]（ui-layout 产物）
@@ -603,6 +635,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           closeDiff: '关闭 diff（Esc）',
           splitDiffTitle: '分栏对比', unifiedDiffTitle: '单栏对比',
           diffFullFile: '显示完整文件（含未变更行）', diffChangesOnly: '仅显示变更行',
+          imgOld: '旧', imgNew: '新', imgLoading: '加载图片…',
+          imgTooLarge: '图片过大（{s}），超出预览上限', imgMissing: '（无此版本）', imgNoPreview: '无法预览图片',
+          imgZoomTitle: '点击查看原图（1:1）', imgCloseZoom: '关闭全屏预览（Esc）', imgSwitchHint: '←/→ 切换旧/新版本',
           historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
           loadingFiles: '加载文件…', commitNoFiles: '该提交无文件变更（合并提交无合并差异）',
           stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', generated: '已生成提交信息（规则来源：{s}）',
@@ -663,6 +698,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           closeDiff: 'Close diff (Esc)',
           splitDiffTitle: 'Split view', unifiedDiffTitle: 'Unified view',
           diffFullFile: 'Show full file (including unchanged lines)', diffChangesOnly: 'Show changed lines only',
+          imgOld: 'Old', imgNew: 'New', imgLoading: 'Loading image…',
+          imgTooLarge: 'Image too large ({s}); exceeds the preview limit', imgMissing: '(no such version)', imgNoPreview: 'Cannot preview image',
+          imgZoomTitle: 'Click to view at actual size (1:1)', imgCloseZoom: 'Close fullscreen preview (Esc)', imgSwitchHint: '←/→ switch old/new',
           historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
           loadingFiles: 'Loading files…', commitNoFiles: 'No file changes in this commit (merge without combined diff)',
           stageFirst: 'Stage files first using the + on the right of each file', generated: 'Commit message generated (rules: {s})',
@@ -897,6 +935,22 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         const base = p.endsWith('/') ? seg + '/' : seg
         const dir = trimmed.length > seg.length ? trimmed.slice(0, trimmed.length - seg.length).replace(/\/+$/, '') : ''
         return { base, dir, seg }
+      }
+
+      // 图片扩展名（与 host 侧 IMAGE_MIMES 同表）：命中即 diff 抽屉进图片预览模式
+      //（跳过 fileDiff，改调 imageBlob 取旧/新两版 data URL）
+      const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'])
+      const isImagePath = (p) => {
+        const m = /\.([a-z0-9]+)$/i.exec(String(p || ''))
+        return !!(m && IMAGE_EXTS.has(m[1].toLowerCase()))
+      }
+      // 字节数人性化显示（图片标签处用）
+      const fmtBytes = (n) => {
+        const v = Number(n)
+        if (!isFinite(v) || v < 0) return ''
+        if (v < 1024) return v + ' B'
+        if (v < 1024 * 1024) return (v / 1024).toFixed(1) + ' KB'
+        return (v / 1024 / 1024).toFixed(2) + ' MB'
       }
 
       // 双 rAF 入场：先让屏外/初始样式完成一次绘制，再触发 transition 切到终态
@@ -1164,6 +1218,81 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
       //   - 滚动条 overview ruler：滚动条内侧细覆盖条，红/绿色块按
       //     「行位置 ÷ 内容总高」比例标出增删位置（渲染后实测 DOM 行位置，与滚动天然
       //     同步；分栏修改对拆上半红/下半绿），悬停加宽、点击按比例跳转居中。
+      //   - 图片预览模式：png/jpg/jpeg/gif/webp/bmp/ico/svg 扩展名不走 fileDiff，
+      //     改调 imageBlob 取旧/新两版 data URL —— 并排自适应缩略展示；
+      //     点击任一图片进全屏 lightbox（1:1 原始尺寸、超出屏幕可滚动、
+      //     左右方向键切换新旧版本）；标签显示实测像素与文件大小；
+      //     单图上限 8MB（超限显示提示行）；
+      //     untracked 无旧版、工作区已删除无新版，单版时单图占满（见 buildImageBody）。
+      // ===== 图片预览模式组件 =====
+      // 单侧图片格：标签（旧/新 徽标 + 实测像素尺寸 + 文件大小）+ 棋盘格图框。
+      // 尺寸在 img onLoad 后从 naturalWidth/Height 读取（无需解码库）。
+      // 无图时显示 note（超限大小 / 无此版本 / 错误信息）；有图可点击进全屏 lightbox。
+      function ImagePane({ img, note, kind, onZoom }) {
+        const [dim, setDim] = React.useState('')
+        const onImgLoad = (e) => {
+          const el = e && e.target
+          if (el && el.naturalWidth) setDim(el.naturalWidth + '×' + el.naturalHeight)
+        }
+        return React.createElement('div', { className: 'gp-img-cell' },
+          React.createElement('div', { className: 'gp-img-label' },
+            React.createElement('span', { className: 'gp-img-tag gp-img-tag-' + kind }, tr(kind === 'old' ? 'imgOld' : 'imgNew')),
+            dim ? React.createElement('span', { className: 'gp-img-dim' }, dim) : null,
+            img && img.bytes ? React.createElement('span', { className: 'gp-img-dim' }, fmtBytes(img.bytes)) : null),
+          img
+            ? React.createElement('div', { className: 'gp-img-box', title: tr('imgZoomTitle'), onClick: () => { if (onZoom) onZoom(kind) } },
+                React.createElement('img', { src: img.dataUrl, alt: '', draggable: false, onLoad: onImgLoad }))
+            : React.createElement('div', { className: 'gp-img-note' }, note || tr('imgMissing')))
+      }
+
+      // 全屏 lightbox：图片按 1:1 原始尺寸显示（小于屏幕居中、超出可滚动），棋盘格底。
+      // 顶部信息条：版本徽标 + 实测像素 + 文件大小 + 切换提示（两版都在时）+ 关闭按钮。
+      // Esc / 点遮罩 / 关闭按钮退出；左右方向键在新旧版之间切换（无需退出重进）。
+      // 键盘监听用 capture 阶段并 stopPropagation——先于 diff 抽屉的 Esc（bubble）
+      // 触发，lightbox 打开时 Esc 只关 lightbox、不连带关抽屉（与确认弹窗同一模式）。
+      function ImageLightbox({ img, kind, both, onSwitch, onClose }) {
+        const [dim, setDim] = React.useState('')
+        const onImgLoad = (e) => {
+          const el = e && e.target
+          if (el && el.naturalWidth) setDim(el.naturalWidth + '×' + el.naturalHeight)
+        }
+        React.useEffect(() => {
+          const onKey = (e) => {
+            if (e.key === 'Escape') { e.stopPropagation(); onClose(); return }
+            if (!both) return
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+              e.stopPropagation()
+              onSwitch(kind === 'old' ? 'new' : 'old')
+            }
+          }
+          window.addEventListener('keydown', onKey, true)
+          return () => window.removeEventListener('keydown', onKey, true)
+        }, [kind, both, onClose, onSwitch])
+        return React.createElement('div', { className: 'gp-lightbox', onClick: onClose },
+          React.createElement('div', { className: 'gp-lightbox-head', onClick: (e) => { e.stopPropagation() } },
+            React.createElement('span', { className: 'gp-img-tag gp-img-tag-' + kind }, tr(kind === 'old' ? 'imgOld' : 'imgNew')),
+            dim ? React.createElement('span', { className: 'gp-img-dim' }, dim) : null,
+            img && img.bytes ? React.createElement('span', { className: 'gp-img-dim' }, fmtBytes(img.bytes)) : null,
+            both ? React.createElement('span', { className: 'gp-lightbox-switch' }, tr('imgSwitchHint')) : null,
+            React.createElement('span', { className: 'gp-lightbox-close' },
+              React.createElement('button', { title: tr('imgCloseZoom'), onClick: onClose }, icon('close')))),
+          // 点图片本体不关闭（stopPropagation），点 stage 空白区随外层遮罩关闭
+          React.createElement('div', { className: 'gp-lightbox-stage' },
+            React.createElement('img', { src: img.dataUrl, alt: '', draggable: false, onLoad: onImgLoad, onClick: (e) => { e.stopPropagation() } })))
+      }
+
+      // 图片 diff 主体布局：并排展示各版本（单版时单图占满）；两版皆无 → 说明行
+      //（超限/读取失败的原因在各自 note 里）。点击任一图片由 DiffDrawer 的 zoom 状态
+      // 切到全屏 lightbox（imgState 与 lightbox 状态都在 DiffDrawer 层）。
+      function buildImageBody(img, onZoom) {
+        if (!img) return null
+        const cells = []
+        if (img.old || img.oldNote) cells.push(React.createElement(ImagePane, { key: 'old', img: img.old, note: img.oldNote, kind: 'old', onZoom }))
+        if (img.new || img.newNote) cells.push(React.createElement(ImagePane, { key: 'new', img: img.new, note: img.newNote, kind: 'new', onZoom }))
+        if (!cells.length) return React.createElement('div', { className: 'gp-img-note' }, tr('imgNoPreview'))
+        return React.createElement('div', { className: 'gp-img-row' + (cells.length === 1 ? ' gp-img-row-one' : '') }, cells)
+      }
+
       function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose }) {
         const [state, setState] = React.useState({ loading: true, text: '', error: '' })
         // 分栏（split）视图：左源文件/右修改后；记忆在 localStorage（gp-diff-split）
@@ -1171,6 +1300,12 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         // 全文（full）视图：-U1000000 超大上下文让整个文件进单个 hunk，
         // 改动行照常红绿高亮、其余行作上下文灰显；记忆在 localStorage（gp-diff-full）
         const [full, setFull] = React.useState(() => prefBool('gp-diff-full', false))
+        // 图片预览模式：isImagePath 命中即启用（跳过 fileDiff，改调 imageBlob）。
+        // imgState = { old, new, oldNote, newNote }（img = {dataUrl, bytes}）；
+        // zoom = { kind } 时全屏 lightbox 展示对应版本（点击图片格进入）
+        const isImg = isImagePath(sel.path)
+        const [imgState, setImgState] = React.useState(null)
+        const [zoom, setZoom] = React.useState(null)
         const [drawerW, setDrawerW] = React.useState(() => prefInt('gp-diff-w', 380, 2400, 0) || Math.min(760, Math.max(440, Math.round(window.innerWidth * 0.42))))
         const [resizing, setResizing] = React.useState(false)
         // 滑入/滑出相位：off（未入场 / sel.closing）时整屉平移到面板正后方且全透明
@@ -1195,16 +1330,41 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         React.useEffect(() => {
           let alive = true
           setState({ loading: true, text: '', error: '' })
+          // 图片文件：unified diff 对二进制无意义，不走 fileDiff；并行请求旧/新两版
+          //（untracked 无旧版；服务端按组解析版本来源，见 host imageBlob）
+          if (isImg) {
+            setImgState(null)
+            setZoom(null)
+            const jobs = []
+            if (sel.group !== 'untracked') {
+              jobs.push(callRpc('imageBlob', { repoId: repo.id, path: sel.path, orig: sel.orig || undefined, group: sel.group, hash: sel.hash || undefined, side: 'old' }).then((r) => ({ side: 'old', r })))
+            }
+            jobs.push(callRpc('imageBlob', { repoId: repo.id, path: sel.path, group: sel.group, hash: sel.hash || undefined, side: 'new' }).then((r) => ({ side: 'new', r })))
+            Promise.all(jobs).then((results) => {
+              if (!alive) return
+              const out = { old: null, new: null, oldNote: '', newNote: '' }
+              for (let i = 0; i < results.length; i++) {
+                const res = results[i]
+                if (!res || !res.r) continue
+                if (res.r.ok && res.r.image) { out[res.side] = res.r.image; continue }
+                if (res.r.ok && res.r.oversize) out[res.side + 'Note'] = fmt(tr('imgTooLarge'), { s: fmtBytes(res.r.size) })
+                else if (!res.r.ok) out[res.side + 'Note'] = res.r.error || tr('loadFailed')
+              }
+              setImgState(out)
+              setState({ loading: false, text: '', error: '' })
+            }).catch((e) => { if (alive) setState({ loading: false, text: '', error: e && e.message ? e.message : String(e) }) })
+            return () => { alive = false }
+          }
           callRpc('fileDiff', { repoId: repo.id, path: sel.path, group: sel.group, hash: sel.hash || undefined, full: full || undefined }).then((r) => {
             if (!alive) return
             if (r && r.ok) setState({ loading: false, text: r.text || '', error: '' })
             else setState({ loading: false, text: '', error: (r && r.error) || tr('loadFailed') })
           }).catch((e) => { if (alive) setState({ loading: false, text: '', error: e && e.message ? e.message : String(e) }) })
           return () => { alive = false }
-        }, [repo.id, sel.path, sel.group, sel.hash, full])
+        }, [repo.id, sel.path, sel.group, sel.hash, sel.orig, full, isImg])
 
-        // ===== 滚动条 overview ruler（测量逻辑见 useDiffRuler）=====
-        const ruler = useDiffRuler(!state.loading && !state.error, (split ? 's:' : 'u:') + state.text)
+        // ===== 滚动条 overview ruler（测量逻辑见 useDiffRuler；图片模式无行标记，停用）=====
+        const ruler = useDiffRuler(!isImg && !state.loading && !state.error, (split ? 's:' : 'u:') + state.text)
 
         React.useEffect(() => {
           const onKey = (e) => { if (e.key === 'Escape') requestClose() }
@@ -1279,9 +1439,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           // 组徽标：工作区三组显示组名；提交文件显示提交短 hash（悬停看完整 hash）
           React.createElement('span', { className: 'gp-chip', title: sel.hash || undefined }, sel.group === 'commit' ? (sel.short || String(sel.hash || '').slice(0, 7)) : (GROUP_META[sel.group] ? tr(GROUP_META[sel.group].titleKey) : sel.group)),
           // 全文切换：开启后整个文件进单个 hunk（改动行红绿高亮、其余作上下文灰显）；
-          // 激活态高亮与分栏切换一致（gp-on）
-          React.createElement('button', { className: 'gp-btn-icon' + (full ? ' gp-on' : ''), title: full ? tr('diffChangesOnly') : tr('diffFullFile'), onClick: () => setFull((v) => { savePrefBool('gp-diff-full', !v); return !v }) }, icon('fullDoc')),
-          React.createElement('button', { className: 'gp-btn-icon', title: split ? tr('unifiedDiffTitle') : tr('splitDiffTitle'), onClick: () => setSplit((v) => { savePrefBool('gp-diff-split', !v); return !v }) }, icon(split ? 'unified' : 'split')),
+          // 激活态高亮与分栏切换一致（gp-on）；图片模式无 hunk，两个视图按钮均隐藏
+          isImg ? null : React.createElement('button', { className: 'gp-btn-icon' + (full ? ' gp-on' : ''), title: full ? tr('diffChangesOnly') : tr('diffFullFile'), onClick: () => setFull((v) => { savePrefBool('gp-diff-full', !v); return !v }) }, icon('fullDoc')),
+          isImg ? null : React.createElement('button', { className: 'gp-btn-icon', title: split ? tr('unifiedDiffTitle') : tr('splitDiffTitle'), onClick: () => setSplit((v) => { savePrefBool('gp-diff-split', !v); return !v }) }, icon(split ? 'unified' : 'split')),
           React.createElement('button', { className: 'gp-btn-icon', title: tr('closeDiff'), onClick: requestClose }, icon('close')))
 
         // ruler 覆盖条：浮在原生滚动条内侧（right = 滚动条宽 + 3px 间隙），
@@ -1297,18 +1457,20 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         const body = React.createElement('div', { className: 'gp-diff-body-wrap' },
           React.createElement('div', { className: 'gp-diff-body', ref: ruler.bodyRef },
             state.loading
-              ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), ' ' + tr('loadingDiff'))
+              ? React.createElement('div', { className: 'gp-scanning' }, React.createElement('span', { className: 'gp-spinner' }), ' ' + tr(isImg ? 'imgLoading' : 'loadingDiff'))
               : state.error
                 ? React.createElement('div', { className: 'gp-empty' }, state.error)
-                : React.createElement('div', { className: 'gp-diff-table' },
-                    parsed.meta.length ? React.createElement('div', { className: 'gp-diff-meta' }, parsed.meta.join('\n')) : null,
-                    split
-                      ? splitPairs.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
-                          b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
-                          b.pairs.map(renderSplitRow)))
-                      : parsed.blocks.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
-                          b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
-                          b.rows.map(renderRow))))),
+                : isImg
+                  ? React.createElement('div', { className: 'gp-img-wrap' }, buildImageBody(imgState, (kind) => setZoom({ kind })))
+                  : React.createElement('div', { className: 'gp-diff-table' },
+                      parsed.meta.length ? React.createElement('div', { className: 'gp-diff-meta' }, parsed.meta.join('\n')) : null,
+                      split
+                        ? splitPairs.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
+                            b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
+                            b.pairs.map(renderSplitRow)))
+                        : parsed.blocks.map((b, bi) => React.createElement(React.Fragment, { key: 'b' + bi },
+                            b.hunk ? React.createElement('div', { className: 'gp-diff-hrow' }, b.hunk) : null,
+                            b.rows.map(renderRow))))),
           rulerEl)
 
         // 滑入/滑出相位：off = 未入场或正在关闭 → 整屉藏到不透明的 Git Panel 正后方。
@@ -1327,7 +1489,17 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
               onPointerDown: (e) => { e.preventDefault(); widthDrag.begin(); setResizing(true) }
             }),
             head,
-            body))
+            body),
+          // 全屏 lightbox：图片模式点击图片格后浮于整个页面之上（z-index 420）；
+          // 对应版本无图（超限/缺失）不会进入（onZoom 只在有图的格上触发）
+          zoom && imgState && imgState[zoom.kind]
+            ? React.createElement(ImageLightbox, {
+                img: imgState[zoom.kind], kind: zoom.kind,
+                both: !!(imgState.old && imgState.new),
+                onSwitch: (kind) => setZoom({ kind }),
+                onClose: () => setZoom(null)
+              })
+            : null)
       }
 
       // 简易 lane 图算法：按行计算提交所在的 lane、合并连线与活跃 lane 区间
@@ -1495,7 +1667,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
             return React.createElement('div', {
               key: f.path, className: 'gp-gfile' + (diffSel && !diffSel.closing && diffSel.repoId === repo.id && diffSel.group === 'commit' && diffSel.hash === e.hash && diffSel.path === f.path ? ' gp-gfile-active' : ''),
               title: f.path + (f.oldPath ? '  ←  ' + f.oldPath : ''),
-              onClick: (ev) => { ev.stopPropagation(); onOpenDiff(repo, { path: f.path, x: f.status, y: ' ', hash: e.hash, short: e.short }, 'commit') }
+              onClick: (ev) => { ev.stopPropagation(); onOpenDiff(repo, { path: f.path, x: f.status, y: ' ', hash: e.hash, short: e.short, orig: f.oldPath || undefined }, 'commit') }
             },
               React.createElement('span', { className: 'gp-diff-glyph ' + gl.cls }, gl.g),
               React.createElement('span', { className: 'gp-gfile-name' }, seg),
@@ -2639,7 +2811,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
                   // requestCloseDiff/finishCloseDiff）
                   onOpenDiff: (repo2, f, group) => setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group && (prev.hash || null) === (f.hash || null)
                     ? { ...prev, closing: true }
-                    : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y, hash: f.hash || null, short: f.short || '' })
+                    : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y, hash: f.hash || null, short: f.short || '', orig: f.orig || null })
                 })))
 
         // 折叠/展开渲染：稳态只渲染一种形态（panelOpen 语义不变，自动刷新轮询继续）；
