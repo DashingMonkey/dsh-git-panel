@@ -7,8 +7,8 @@
  * 权威配置非缓存）、审计日志（$DSH_HOME/git-panel/logs/）、
  * LLM 提交信息生成，以及面向 Client 的 package-private JSON RPC。
  *
- * 依赖的 Host 服务（全部 ctx.get 可选读取）：
- *   subprocess / fs / llm / settings / sandboxPolicy / agentDefaultModel / timer
+ * 依赖的 Host 服务（fs / subprocess / connection / webServer 为硬依赖，其余 ctx.get 可选读取）：
+ *   fs / subprocess / connection / llm / settings / sandboxPolicy / agentDefaultModel / timer
  *
  * 装载形态：
  *   - 动态 Cordis 包：本文件 `export default function () {` 与结尾 `}` 之间的
@@ -180,6 +180,15 @@ export default function () {
           errNothingStaged: '没有已暂存的文件，请先点击文件右侧的 + 暂存',
           errCommit: 'git commit 失败: {e}', errNoMessage: '提交信息不能为空',
           errPush: 'push 失败（提交已保留）: {e}', errFetch: 'fetch 失败: {e}', errMerge: 'merge 失败（fetch 已完成）: {e}',
+          errMergeConflict: '合并冲突：{n} 个文件未解决。解决后点该文件行的 ＋ 标记为已解决，或用「中止合并」放弃本次合并',
+          errMergePending: '已有未完成的合并（MERGE_HEAD 存在）：请先解决冲突并提交，或使用「中止合并」放弃本次合并',
+          errNoMergeInProgress: '当前没有进行中的合并，无需中止',
+          errMergeAbort: '中止合并失败: {e}', mergeAborted: '已中止合并，工作区已恢复到合并前状态',
+          errMergeCommit: '提交合并失败: {e}', mergeCommitted: '已提交本次合并，合并完成',
+          errNoMergeToCommit: '当前没有进行中的合并，无需完成合并',
+          errOtherOpInProgress: '当前进行的是 {op}，不是合并；{op} 的收尾出口不在面板里，请回终端执行 git {op} --continue（或 git {op} --abort）',
+          mergeCommittedDirty: '已提交本次合并；工作区还有 {n} 个未暂存文件未包含在本次提交里',
+          errCommitConflict: '还有 {n} 个文件未解决：解决后点该文件行的 ＋ 标记为已解决，再提交',
           errBadBranch: '非法分支名', errSwitch: '切换分支失败: {e}',
           errStash: 'stash 失败: {e}', errStashPop: 'stash pop 失败: {e}',
           errReset: 'reset 失败: {e}', errClean: 'clean 失败: {e}',
@@ -191,7 +200,7 @@ export default function () {
           errGenMissing: '生成任务不存在或已过期，请重试',
           errGenModelInvalid: '模型配置无效（缺少 provider 或 model）', errNoRulesHome: '无法定位规则/配置目录',
           errTimeout: '进程执行超时（{ms}ms）: {c}', noCommits: '无提交', errGenerateNoFiles: '请先暂存文件（生成基于 staged diff）',
-          errBinary: '无法读取文件内容（可能为二进制）',
+          errBinary: '无法读取文件内容（可能为二进制）', conflictNoContent: '冲突文件在工作区不存在（删除类冲突或二进制文件）',
           errNoYaml: '缺少 yaml', errRules: '规则校验失败: {e}', errNoSys: '缺少 system_prompt 字段', errNoUser: '缺少 user_context 字段',
           errRulesWrite: '写入失败: {p}',
           rulesSaved: '规则已保存到 {p}', rulesReset: '已重置为默认规则',
@@ -223,6 +232,15 @@ export default function () {
           errNothingStaged: 'No staged files; stage files first with the + on the right',
           errCommit: 'git commit failed: {e}', errNoMessage: 'Commit message cannot be empty',
           errPush: 'push failed (commits kept): {e}', errFetch: 'fetch failed: {e}', errMerge: 'merge failed (fetch already done): {e}',
+          errMergeConflict: 'Merge conflict: {n} unresolved file(s). Resolve them and press + on the row to mark as resolved, or use "Abort Merge" to discard this merge',
+          errMergePending: 'A merge is already in progress (MERGE_HEAD exists): resolve and commit it first, or use "Abort Merge"',
+          errNoMergeInProgress: 'No merge in progress to abort',
+          errMergeAbort: 'Abort merge failed: {e}', mergeAborted: 'Merge aborted; worktree restored to the pre-merge state',
+          errMergeCommit: 'Failed to commit the merge: {e}', mergeCommitted: 'Merge committed',
+          errNoMergeToCommit: 'No merge in progress to complete',
+          errOtherOpInProgress: 'A {op} is in progress, not a merge; its finishing steps are not in the panel — run git {op} --continue (or git {op} --abort) in a terminal',
+          mergeCommittedDirty: 'Merge committed; {n} unstaged file(s) in the worktree were not included in this commit',
+          errCommitConflict: '{n} file(s) are still unresolved: resolve them and press + on the row before committing',
           errBadBranch: 'Invalid branch name', errSwitch: 'Failed to switch branch: {e}',
           errStash: 'stash failed: {e}', errStashPop: 'stash pop failed: {e}',
           errReset: 'reset failed: {e}', errClean: 'clean failed: {e}',
@@ -234,7 +252,7 @@ export default function () {
           errGenMissing: 'Generation task not found or expired, please retry',
           errGenModelInvalid: 'Invalid model configuration (missing provider or model)', errNoRulesHome: 'Cannot locate rules/config directory',
           errTimeout: 'Process execution timed out ({ms}ms): {c}', noCommits: 'no commits', errGenerateNoFiles: 'Stage files first (generation is based on the staged diff)',
-          errBinary: 'Cannot read file content (may be binary)',
+          errBinary: 'Cannot read file content (may be binary)', conflictNoContent: 'Conflict file is absent from the worktree (delete/delete conflict or binary file)',
           errNoYaml: 'Missing yaml', errRules: 'Rules validation failed: {e}', errNoSys: 'Missing system_prompt field', errNoUser: 'Missing user_context field',
           errRulesWrite: 'Write failed: {p}',
           rulesSaved: 'Rules saved to {p}', rulesReset: 'Reset to default rules',
@@ -484,8 +502,8 @@ export default function () {
         } catch (e) { return false }
       }
 
-      // 审计写入串行化：读全文件+回写是非原子操作，并发操作（如审批门 + git 执行）
-      // 同时写会互相覆盖丢行；用 promise 链排队，且失败不影响下一次写入。
+      // 审计写入串行化：读全文件+回写是非原子操作，并发写操作（如 stage 与 commit 连续
+      // 触发）同时写会互相覆盖丢行；用 promise 链排队，且失败不影响下一次写入。
       let auditChain = Promise.resolve()
       function audit(entry) {
         auditChain = auditChain.then(() => auditWrite(entry)).catch(() => {})
@@ -903,13 +921,25 @@ export default function () {
         return entries
       }
 
+      // 未合并（冲突）判定：porcelain v1 中 x/y 任一为 'U'，或 AA / DD 组合。
+      // 这类条目在 index 里有 1/2/3 三个阶段，既不是「已暂存」也不是「未暂存的改动」，
+      // 必须单独成组——否则会被同时算进 staged 与 unstaged，用户看到的是两个可操作
+      // 分组，而任何针对它们的 add/reset 都只会让状态更乱。
+      function isUnmerged(x, y) {
+        if (x === 'U' || y === 'U') return true
+        return (x === 'A' && y === 'A') || (x === 'D' && y === 'D')
+      }
+
       async function repoStatus(repo) {
-        // 4 条只读命令互相无依赖，并行执行把状态刷新延迟降到最慢的一条
-        const [branchR, headR, statusR, upR] = await Promise.all([
+        // 5 条只读命令互相无依赖，并行执行把状态刷新延迟降到最慢的一条。
+        // rev-parse -q --verify MERGE_HEAD：合并进行中（含冲突已解决但未提交）时退出码 0，
+        // 面板据此提供「中止合并」出口——仅看未合并条目会漏掉「冲突已全部解决但仍未提交」的状态。
+        const [branchR, headR, statusR, upR, mergeHeadR] = await Promise.all([
           gitRun(repo.path, ['symbolic-ref', '--short', '-q', 'HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
           gitRun(repo.path, ['rev-parse', '--short', 'HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
           gitRun(repo.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { maxBytes: 4 * 1024 * 1024, timeoutMs: 30000 }),
-          gitRun(repo.path, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { maxBytes: 4096, timeoutMs: 30000 })
+          gitRun(repo.path, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { maxBytes: 4096, timeoutMs: 30000 }),
+          gitRun(repo.path, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
         ])
         let branch = null
         if (branchR.code === 0) branch = (branchR.text || '').trim()
@@ -918,9 +948,11 @@ export default function () {
         const staged = []
         const unstaged = []
         const untracked = []
+        const conflicted = []
         for (const e of entries) {
           if (e.x === '?' && e.y === '?') { untracked.push({ path: e.path, x: '?', y: '?', orig: null }); continue }
           if (e.x === '!' && e.y === '!') continue
+          if (isUnmerged(e.x, e.y)) { conflicted.push({ path: e.path, x: e.x, y: e.y, orig: e.orig }); continue }
           if (e.x !== ' ' && e.x !== '?' && e.x !== '!') staged.push({ path: e.path, x: e.x, y: e.y, orig: e.orig })
           if (e.y !== ' ' && e.y !== '?' && e.y !== '!') unstaged.push({ path: e.path, x: e.x, y: e.y, orig: e.orig })
         }
@@ -935,13 +967,52 @@ export default function () {
             if (parts.length === 2) aheadBehind = { ahead: parseInt(parts[0], 10) || 0, behind: parseInt(parts[1], 10) || 0 }
           }
         }
-        return ok({ branch, upstream, aheadBehind, staged, unstaged, untracked, statusError: statusR.code === 0 ? null : (statusR.errText || statusR.text).slice(0, 200) })
+        // 「其它进行中的操作」（rebase / cherry-pick / revert）判定：面板只把 MERGE_HEAD
+        // 当合并中间态，但这三种状态同样把 index 留在未合并阶段、同样出现在冲突分组里，
+        // 而它们的收尾出口（--continue / --skip / --abort）都不在面板里。不区分就会把
+        // 「解决完冲突提交即可完成合并」这句指引说错——rebase 下提交虽能被 git 接受
+        // （实测会用自己的提交信息替换掉原提交信息），仍应引导回终端 --continue。
+        // 成本控制：3 条 ref 探测只在下述两种状态下付，常规刷新（有分支、无冲突）零开销——
+        //   - 有未合并条目：冲突分组的指引文案要区分「合并」与「rebase/cherry-pick/revert」；
+        //   - HEAD detached：rebase 全程在 detached HEAD 上，冲突已解决完的那一段
+        //     （分组里看不到任何冲突）同样需要这段指引。
+        // 不用 `git rev-parse --git-path a b c d` 省进程：实测第二个参数起被当作 revision
+        // 直接 fatal；改用文件存在性探测则要处理 worktree 下位于 .git 之外的 gitdir。
+        const detachedHead = branchR.code !== 0 && headR.code === 0
+        let otherOp = null
+        if (conflicted.length > 0 || detachedHead) {
+          const [rbR, cpR, rvR] = await Promise.all([
+            gitRun(repo.path, ['rev-parse', '-q', '--verify', 'REBASE_HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
+            gitRun(repo.path, ['rev-parse', '-q', '--verify', 'CHERRY_PICK_HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
+            gitRun(repo.path, ['rev-parse', '-q', '--verify', 'REVERT_HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
+          ])
+          otherOp = rbR.code === 0 ? 'rebase' : cpR.code === 0 ? 'cherry-pick' : rvR.code === 0 ? 'revert' : null
+        }
+        const mergeMessage = mergeHeadR.code === 0 ? await mergeMessageOf(repo) : null
+        return ok({ branch, upstream, aheadBehind, staged, unstaged, untracked, conflicted, mergeInProgress: mergeHeadR.code === 0, otherOp, mergeMessage, statusError: statusR.code === 0 ? null : (statusR.errText || statusR.text).slice(0, 200) })
+      }
+
+      // 合并提交信息：git 收尾合并用的是 .git/MERGE_MSG（`git commit --no-edit` 的来源），
+      // 面板把它的主题显示在「完成合并」按钮上，免得用户点下去才知道会写进什么。
+      // --git-path 在 worktree / 分离 gitdir 下给出绝对路径，故两种形态都要接；
+      // 取第一个非注释行（MERGE_MSG 里还带着 "# Conflicts:" 这类注释行）。
+      async function mergeMessageOf(repo) {
+        const r = await gitRun(repo.path, ['rev-parse', '--git-path', 'MERGE_MSG'], { maxBytes: 4096, timeoutMs: 30000 })
+        if (r.code !== 0) return null
+        const p = (r.text || '').trim()
+        if (!p) return null
+        const abs = /^([A-Za-z]:[\\/]|[\\/])/.test(p) ? p : joinPath(repo.path, p)
+        const text = await fsReadText(abs)
+        if (text === null) return null
+        const subject = String(text).split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'))
+        return subject ? subject.slice(0, 200) : null
       }
 
       // repoStatus + 变更集成员校验（stage/unstage/discard/prepareGenerate/fileDiff
       // 共用）：状态读取失败或 files 含变更集外路径时返回 fail——与写操作同一标准，
       // 防任意路径被当作操作目标；errKey 选违例文案（unstage 用 errNotStaged，其余
-      // errNotChanged）。通过则返回 { status, known }。
+      // errNotChanged）。通过则返回 { status, known }。分组名即 status 的键
+      // （staged/unstaged/untracked/conflicted），调用方按需传入。
       async function checkFilesInGroups(repo, files, groups, errKey) {
         const status = await repoStatus(repo)
         if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
@@ -1017,6 +1088,19 @@ export default function () {
           const text = 'diff --git a/' + path + ' b/' + path + '\nnew file mode 100644\n--- /dev/null\n+++ b/' + path + '\n@@ -0,0 +1,' + Math.min(LIMIT, allLines.length) + ' @@\n' + capped
           return ok({ text: capFullText(text, full).slice(0, 500 * 1024), kind: 'untracked' })
         }
+        // 冲突（未合并）文件：不展示 git 的组合 diff（diff --cc 的双列前缀 @@/`+ `/` -`
+        // 不适配前端 parseDiff 的单列解析），直接给工作区文件全文——里面本来就带
+        // <<<<<<< / ======= / >>>>>>> 冲突标记，正是解决冲突需要的视图。
+        // 删除类冲突（DD/DU/UD）工作区可能没有该文件，或文件是二进制 → 明确提示而非空白。
+        if (group === 'conflicted') {
+          const content = await fsReadText(joinPath(repo.path, path))
+          if (content === null) return ok({ text: tr('conflictNoContent'), kind: 'conflicted' })
+          const allLines = content.split('\n')
+          const LIMIT = full ? 20000 : 4000
+          const capped = allLines.slice(0, LIMIT).map((l) => '+' + l).join('\n')
+          const text = 'diff --git a/' + path + ' b/' + path + '\n--- a/' + path + '\n+++ b/' + path + '\n@@ -0,0 +1,' + Math.min(LIMIT, allLines.length) + ' @@\n' + capped
+          return ok({ text: capFullText(text, full).slice(0, 500 * 1024), kind: 'conflicted' })
+        }
         const args = (group === 'staged' ? ['diff', '--staged'] : ['diff']).concat(full ? [DIFF_FULL_U] : [], ['--', path])
         const r = await gitRun(repo.path, args, { maxBytes: 512 * 1024, timeoutMs: 60000 })
         if (r.code !== 0) return fail(fmt(tr('errDiff'), { e: (r.errText || r.text).slice(0, 200) }))
@@ -1031,8 +1115,9 @@ export default function () {
       //   staged   ：旧版 = HEAD:path；新版 = index(:path)（rename 旧版在 orig 路径）
       //   commit   ：旧版 = hash^:path（新增文件/根提交无旧版）；新版 = hash:path
       // 工作区文件走 fs.readBytes；git 对象走 cat-file blob（spawnRawBytes 收原始
-      // 字节）。单图上限 IMAGE_MAX_BYTES（RPC 通道按 base64 文本传 data URL，
-      // 8MB → ~10.7MB 字符串，远低于通道 300MB 上限）；超限返回 oversize 标记，
+      // 字节）。单图上限 IMAGE_MAX_BYTES（RPC 按 base64 文本传 data URL，
+      // 8MB → ~10.7MB 字符串；DSH 的 /api 通道请求体上限 300MB，而图片只在响应方向，
+      // 本插件的 /git-panel 通道入站上限 32MB 与之无关）；超限返回 oversize 标记，
       // 由前端提示而非传坏图。任何读取异常一律归为 image:null（前端显示无此版本）。
       const IMAGE_MAX_BYTES = 8 * 1024 * 1024
       const IMAGE_MIMES = {
@@ -1313,9 +1398,11 @@ export default function () {
 
       // ============ 写操作 ============
       // 暂存/取消暂存：可逆的本地 index 操作（不写提交、不触网），由面板用户显式点击触发，
-      // 不经审批门（否则每次点 ＋ 都会弹确认窗，不可用）；仍写审计日志。commit/push 等不变。
+      // 不设确认弹窗（否则每次点 ＋ 都要确认，不可用）；仍写审计日志。
       async function opStage(repo, files) {
-        const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
+        // conflicted 也允许：对未合并路径执行 git add 正是「标记为已解决」的标准动作
+        //（index 三阶段被合并成单一 stage 0），冲突出口的一半就靠它。
+        const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged', 'conflicted'], 'errNotChanged')
         if (!chk.ok) return chk
         const r = await gitRunFiles(repo.path, ['add'], files, { maxBytes: 128 * 1024, timeoutMs: 60000 })
         if (r.code !== 0) return fail(fmt(tr('errAdd'), { e: (r.errText || r.text).slice(0, 300) }))
@@ -1345,6 +1432,13 @@ export default function () {
       async function opCommit(repo, files, message) {
         const status = await repoStatus(repo)
         if (!status.ok) return fail(fmt(tr('errStatus'), { e: status.error }))
+        // 未解决冲突先拦：git 自己会以 "Committing is not possible because you have unmerged
+        // files" 拒绝（exit 128，实测），原文对用户不可操作；面板已有冲突分组，这里直接给出
+        // 可执行文案。放在 stagedPaths 判空之前：有暂存内容、别处仍有未解决冲突时，冲突才是
+        // 真正的原因。（「有冲突且暂存为空」这个组合到不了这里——commit RPC 层对空 files 先行
+        // 返回 errNothingStaged，面板 UI 更早就把提交按钮禁掉了；RPC 层那句提示让用户去点 ＋，
+        // 对冲突行而言恰好就是「标记为已解决」，不算误导。）
+        if (status.conflicted.length > 0) return fail(fmt(tr('errCommitConflict'), { n: status.conflicted.length }))
         const stagedInfo = new Map(status.staged.map((f) => [f.path, f]))
         const stagedPaths = Array.from(stagedInfo.keys())
         if (stagedPaths.length === 0) return fail(tr('errNothingStaged'))
@@ -1383,6 +1477,11 @@ export default function () {
       }
 
       async function opPull(repo) {
+        // 合并进行中（MERGE_HEAD 存在）时先拦住：此时 git merge 必报 "You have not
+        // concluded your merge"，直接抛原文会把「上次冲突还没收拾」误读成新故障；
+        // 面板已提供「中止合并」作为该状态的唯一出口。
+        const pending = await gitRun(repo.path, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
+        if (pending.code === 0) return fail(tr('errMergePending'))
         const rf = await gitRun(repo.path, ['fetch', '--all', '--prune'], { maxBytes: 256 * 1024, timeoutMs: 180000 })
         if (rf.code !== 0) return fail(fmt(tr('errFetch'), { e: (rf.errText || rf.text).slice(0, 300) }))
         const upR = await gitRun(repo.path, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { maxBytes: 4096, timeoutMs: 30000 })
@@ -1391,7 +1490,14 @@ export default function () {
         // 失败，会把已完成的 fetch 误报为整体 Pull 失败
         if (target === null) return ok({ summary: tr('fetched'), detail: (rf.text || '').trim().slice(0, 300) })
         const rm = await gitRun(repo.path, ['merge', '--no-edit', target], { maxBytes: 256 * 1024, timeoutMs: 120000 })
-        if (rm.code !== 0) return fail(fmt(tr('errMerge'), { e: (rm.errText || rm.text).slice(0, 400) }))
+        if (rm.code !== 0) {
+          // 冲突是 pull 最常见的失败形态，且工作区已被留在合并中间态：给出可操作提示
+          //（解决后标记 / 中止合并），而不是只抛 git 原文让用户自己去命令行收拾。
+          const u = await gitRun(repo.path, ['diff', '--name-only', '--diff-filter=U'], { maxBytes: 64 * 1024, timeoutMs: 30000 })
+          const n = u.code === 0 ? (u.text || '').split('\n').filter(Boolean).length : 0
+          if (n > 0) return fail(fmt(tr('errMergeConflict'), { n }))
+          return fail(fmt(tr('errMerge'), { e: (rm.errText || rm.text).slice(0, 400) }))
+        }
         return ok({ summary: tr('pulled'), detail: (rm.text || '').trim().slice(0, 300) })
       }
 
@@ -1441,6 +1547,61 @@ export default function () {
         return ok({ summary: tr('cleaned'), detail: (r.text || '').trim().slice(0, 300) })
       }
 
+      // 「当前没有进行中的合并，无需中止 / 完成合并」的失败文案（action 区分两个出口的
+      // 措辞）：这句话本身没错，但 rebase / cherry-pick / revert 进行中时用户多半正是从
+      // 冲突分组点过来的——三者同样把 index 留在未合并状态、同样出现在冲突分组里，而收尾
+      // 出口不在面板。把真实状态说出来，别让他对着「当前没有进行中的合并」发呆
+      // （`git merge --abort` 在 rebase 下实测直接 fatal，所以这里只给出口指引，
+      //   不做任何猜测性动作）。
+      async function noMergeReason(repo, action) {
+        const [rbR, cpR, rvR] = await Promise.all([
+          gitRun(repo.path, ['rev-parse', '-q', '--verify', 'REBASE_HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
+          gitRun(repo.path, ['rev-parse', '-q', '--verify', 'CHERRY_PICK_HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
+          gitRun(repo.path, ['rev-parse', '-q', '--verify', 'REVERT_HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
+        ])
+        const op = rbR.code === 0 ? 'rebase' : cpR.code === 0 ? 'cherry-pick' : rvR.code === 0 ? 'revert' : null
+        if (op !== null) return fmt(tr('errOtherOpInProgress'), { op })
+        return action === 'commit' ? tr('errNoMergeToCommit') : tr('errNoMergeInProgress')
+      }
+
+      // 中止进行中的合并（pull 冲突后的唯一整体出口）：--abort 会清掉 index 的未合并
+      // 阶段并把工作区恢复到合并前，是「回到动手之前」的那一步。
+      // 前置校验 MERGE_HEAD：它同时是 git 自己的前置条件，也让「误点」在无合并时快速
+      // 失败而不是对工作区做任何事（没有合并时 git merge --abort 本身也会报错）。
+      async function opMergeAbort(repo) {
+        const head = await gitRun(repo.path, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
+        if (head.code !== 0) return fail(await noMergeReason(repo, 'abort'))
+        const r = await gitRun(repo.path, ['merge', '--abort'], { maxBytes: 128 * 1024, timeoutMs: 120000 })
+        if (r.code !== 0) return fail(fmt(tr('errMergeAbort'), { e: (r.errText || r.text).slice(0, 300) }))
+        return ok({ summary: tr('mergeAborted'), detail: (r.text || '').trim().slice(0, 300) })
+      }
+
+      // 完成合并（合并的另一个收尾出口）：冲突已全部标记为已解决、但解决结果与 HEAD 一致
+      // 时，index 里没有任何相对 HEAD 的差异，git status 于是完全为空——文件既不在冲突组也
+      // 不在暂存组，面板的提交按钮（要求 staged 非空）永远点不下去，用户只剩「中止合并」这
+      // 条丢工作的路。但 git 本身允许此时直接 `git commit`（提交信息取 .git/MERGE_MSG，即
+      // 分支名合并摘要）来完成合并，这个 op 就是那条路。
+      // 前置校验：MERGE_HEAD 存在（无合并时快速失败，不做任何事）+ 无未解决冲突（冲突未解决
+      // 时该走「解决 → 标记为已解决」，而不是在这里提交一个半成品）。
+      async function opMergeCommit(repo) {
+        const head = await gitRun(repo.path, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
+        if (head.code !== 0) return fail(await noMergeReason(repo, 'commit'))
+        const un = await gitRun(repo.path, ['diff', '--name-only', '--diff-filter=U'], { maxBytes: 64 * 1024, timeoutMs: 30000 })
+        const n = un.code === 0 ? (un.text || '').split('\n').filter(Boolean).length : 0
+        if (n > 0) return fail(fmt(tr('errCommitConflict'), { n }))
+        // --no-edit：沿用 MERGE_MSG，不弹编辑器；失败原文照抛（如 pre-commit hook 拒绝）
+        const r = await gitRun(repo.path, ['commit', '--no-edit'], { maxBytes: 256 * 1024, timeoutMs: 120000 })
+        if (r.code !== 0) return fail(fmt(tr('errMergeCommit'), { e: (r.errText || r.text).slice(0, 400) }))
+        // 提交后核对工作区：index 相对 HEAD 没有差异、而工作区仍有未暂存改动时，这些改动
+        // 不在本次合并提交里。最常见的来源正是「解决冲突 → 标记为已解决 → 又取消了暂存」，
+        // 此刻面板没有任何暂存内容，用户很容易以为那份解决结果已经进合并提交了——留在
+        // 工作区不会丢数据，但必须说出来，否则他推出去的合并提交里没有自己刚解决的冲突。
+        const dirty = await gitRun(repo.path, ['diff', '--name-only'], { maxBytes: 64 * 1024, timeoutMs: 30000 })
+        const dirtyN = dirty.code === 0 ? (dirty.text || '').split('\n').filter(Boolean).length : 0
+        const summary = dirtyN > 0 ? fmt(tr('mergeCommittedDirty'), { n: dirtyN }) : tr('mergeCommitted')
+        return ok({ summary, detail: (r.text || '').trim().slice(0, 300) })
+      }
+
       // 放弃更改（不可逆，直接执行，仅留审计）：
       //   staged    组 → git restore --staged --worktree（index + 工作区整体恢复到 HEAD）
       //   unstaged  组 → git checkout --（工作区恢复到 index，保留已暂存部分）
@@ -1487,11 +1648,11 @@ export default function () {
       // ============ RPC（Client → Host） ============
       // 双形态注册：
       //   - 动态 Cordis 包：harness.handle(method, fn)（动态包运行器注入的内置件）
-      //   - 文件态（npm 包 / web profile）：ctx.connection.rpc.handle('/git-panel', ...)
-      //     （@deepseek-ai/dsh-client-connection 的通用 RPC 通道，自带浏览器信任围栏；
-      //       通道名不得为保留的 /api）
+      //   - 文件态（npm 包 / web profile）：直接占用 webServer 的 /git-panel 前缀路由
+      //     （见下方 registerHttpChannel；通道名不得为保留的 /api）
       const dynamicHarness = typeof harness !== 'undefined' ? harness : null
       const connection = ctx.get('connection')
+      const webServer = ctx.get('webServer')
       const rpcHandlers = new Map()
       const registerRpc = (method, fn) => {
         if (dynamicHarness && typeof dynamicHarness.handle === 'function') {
@@ -1502,16 +1663,125 @@ export default function () {
         }
         rpcHandlers.set(method, fn)
       }
-      if (!dynamicHarness && connection && connection.rpc && typeof connection.rpc.handle === 'function') {
-        // 第三参 { authority: 'loopback' } 必传：dsh-client-connection 0.1.0-rc.6 的
-        // register(owner, channel, handler, options) 内部直接读 options.authority，
-        // 缺省时 options 为 undefined 会抛 TypeError；'loopback' 同时把信任围栏收
-        // 到仅本地浏览器（127.0.0.1/localhost）可访问该 RPC 通道。
-        connection.rpc.handle('/git-panel', async (endpoint, payload) => {
+      // 为什么不用 connection.rpc.handle(channel, handler)：
+      // 该实现内部是 owner.effect(() => owner.webServer.register(route))，即要求
+      // 「调用方 fiber 的 store 能解析出 webServer」。但 dsh-client-connection 的
+      // 服务实例读 ctx 时，cordis 会给它一个 shadow 上下文（createShadow），其 fiber
+      // 是 connection 插件自己的 fiber（store 为 connection/credentials/webRuntime），
+      // 而不是本插件的 fiber；该 fiber 的 isolate 表里 webServer 键还与 store 的键不同源，
+      // 于是 owner.webServer 的读取必然抛
+      //   cannot get property "webServer" without inject
+      // → 装载期整棵插件树被判 failed to load，dsh 直接启动失败。
+      // （本插件 inject 里带 webServer 也救不了：被读的不是本插件的上下文。）
+      // 因此这里直接占用 webServer 路由——这正是 connection 自身挂 /api 的做法
+      // （dsh-client-connection 的 apply 在 ctx.inject(['webServer']) 里
+      //   webCtx.effect(() => webCtx.webServer.register(route))），
+      // 浏览器信任围栏与签名会话 cookie 校验仍复用 connection 服务自己的
+      // requestRejection，语义与通用 RPC 通道完全一致。
+      function registerHttpChannel(channel, handler) {
+        // 请求/响应信封与 dsh-client-connection 的 rpcFetchHandler 保持一致：
+        // 入 {type:'client-request', rpcId, method, payload}，出 {type:'server-response', rpcId, result}。
+        // 对参考实现（rpcFetchHandler + bridge）的有意差异，全部列在这里，改这块前先看：
+        //   - 非 POST 答 405（参考实现在 fetch 层答 404）：围栏已在前面，不泄露端点存在性，
+        //     405 对通用客户端更准确；
+        //   - 413 附带 connection: close 并销毁请求（与 bridge 同款），避免继续收完剩余 body；
+        //   - 入站体积上限 32MB（参考实现默认 300MB）：本通道只收小型 JSON 请求，图片等大
+        //     payload 只在响应方向，无需 300MB 的内存缓冲上限；
+        //   - 不实现 requestBodyMode 的 streaming 分支：本通道所有端点都是 buffered。
+        // 保持一致的：围栏先行、content-type 必须 application/json、body 不是 JSON 答 400、
+        // 信封不合法答 200 + 错误信封（而非 4xx 纯文本）。
+        const MAX_BODY_BYTES = 32 * 1024 * 1024
+        const endpointOf = (pathname) => {
+          if (!pathname.startsWith(channel + '/')) return null
+          const endpoint = pathname.slice(channel.length + 1)
+          if (!endpoint) return null
+          if (endpoint.split('/').some((s) => s === '' || s === '.' || s === '..' || !/^[A-Za-z0-9_$.-]+$/.test(s))) return null
+          return endpoint
+        }
+        const sendJson = (res, status, body) => {
+          const text = JSON.stringify(body)
+          res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(text) })
+          res.end(text)
+        }
+        // 信封层错误的 code 与 dsh-client-connection 的 gateway/bad-request 对齐
+        // （业务层失败仍走 toEnvelope → bad-request）：客户端只读 message，
+        // 这里保留 code 是为了出错日志能与 DSH 自身的 gateway 错误对得上。
+        const envelopeError = (msg) => ({ ok: false, error: { code: 'gateway/bad-request', message: String(msg), details: { issues: [] } } })
+        // 围栏判定：一律 fail closed——服务缺失、方法改名、实现抛错三种情况全部按
+        // forbidden 处理。inject 已硬依赖 connection，所以"服务缺失"现实中不会发生；
+        // 真正的风险是 DSH 内部 API 变更（本插件的通信层正是被 dsh-client-connection
+        // 的一次变更逼着重写的）：那时若放行，/git-panel 会静默变成无鉴权端点，
+        // 而这种降级不会有任何报错。宁可面板暂时用不了，也不能悄悄失去围栏。
+        const rejectionOf = (req) => {
+          if (!connection || typeof connection.requestRejection !== 'function') return 403
+          try { return connection.requestRejection(req) } catch (e) { return 403 }
+        }
+        return webServer.register({
+          kind: 'prefix',
+          path: channel,
+          handler: async (req, res) => {
+            // 围栏先行（顺序同 connection 自己挂 /api 的做法）：未认证请求不该从
+            // 405 / 415 / 404 的差异里推断出这个端点存在。
+            const rejection = rejectionOf(req)
+            if (rejection !== undefined) {
+              res.writeHead(rejection)
+              res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+              return
+            }
+            if (req.method !== 'POST') { res.writeHead(405); res.end('method not allowed'); return }
+            const endpoint = endpointOf(new URL(req.url || '/', 'http://localhost').pathname)
+            if (endpoint === null) { res.writeHead(404); res.end('not found'); return }
+            const contentType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase()
+            if (contentType !== 'application/json') { res.writeHead(415); res.end('content type must be application/json'); return }
+            const tooLarge = () => {
+              res.writeHead(413, { connection: 'close' })
+              res.end('payload too large')
+              req.destroy()
+            }
+            const declared = Number(req.headers['content-length'])
+            if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) { tooLarge(); return }
+            const chunks = []
+            let size = 0
+            try {
+              for await (const chunk of req) {
+                size += chunk.length
+                if (size > MAX_BODY_BYTES) { tooLarge(); return }
+                chunks.push(chunk)
+              }
+            } catch (e) { res.writeHead(400); res.end('body read failed'); return }
+            let message
+            try { message = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch (e) { res.writeHead(400); res.end('body is not JSON'); return }
+            // 信封不合法（缺 type/method/rpcId、method 与端点不符、body 不是对象）：与参考实现
+            // 一样用 200 + 错误信封回答，rpcId 沿用客户端的值（非字符串则用 invalid-request，
+            // 与 dsh-client-connection 的 INVALID_REQUEST_RPC_ID 同值）。
+            // 浏览器端 rpc.call 对非 2xx 一律抛 transport failure，只有信封才能把"请求本身
+            // 不合法"作为可读的业务错误交回调用方；rpcId 不是字符串时客户端本就无法配对本响应，
+            // 也就没有必要为它凑一个 4xx。
+            const rpcIdOk = !!message && typeof message.rpcId === 'string'
+            const rpcId = rpcIdOk ? message.rpcId : 'invalid-request'
+            if (!rpcIdOk || typeof message !== 'object' || Array.isArray(message) ||
+              message.type !== 'client-request' || message.method !== endpoint) {
+              sendJson(res, 200, { type: 'server-response', rpcId, result: envelopeError('invalid client-request message') })
+              return
+            }
+            try {
+              const result = await handler(endpoint, message.payload)
+              sendJson(res, 200, { type: 'server-response', rpcId, result })
+            } catch (e) {
+              // 响应可能已经开始（客户端中途断开）：吞掉二次写入异常即可
+              try { sendJson(res, 200, { type: 'server-response', rpcId, result: toEnvelope(fail(e && e.message ? e.message : String(e))) }) } catch (e2) { /* 连接已断 */ }
+            }
+          }
+        })
+      }
+      if (!dynamicHarness && webServer && typeof webServer.register === 'function') {
+        ctx.effect(() => registerHttpChannel('/git-panel', async (endpoint, payload) => {
           const fn = rpcHandlers.get(endpoint)
           if (!fn) return toEnvelope(fail('unknown method: ' + endpoint))
           try { return toEnvelope(await fn(payload || {})) } catch (e) { return toEnvelope(fail(e && e.message ? e.message : String(e))) }
-        }, { authority: 'loopback' })
+        }), 'git-panel: /git-panel rpc channel')
+      } else if (!dynamicHarness) {
+        console.error('[git-panel] webServer 服务不可用，RPC 通道未注册（面板将无法与 Host 通信）')
       }
       // ---- 会话 / 扫描 ----
       registerRpc('setLocale', async (args) => {
@@ -1614,7 +1884,7 @@ export default function () {
         }
         // 与写操作同一标准：path 必须属于当前变更集的对应分组（纵深防御，
         // 防止任意 path 被当作 untracked 读取渲染到面板）
-        const group = args.group === 'staged' ? 'staged' : args.group === 'untracked' ? 'untracked' : 'unstaged'
+        const group = args.group === 'staged' ? 'staged' : args.group === 'untracked' ? 'untracked' : args.group === 'conflicted' ? 'conflicted' : 'unstaged'
         const chk = await checkFilesInGroups(repo, [args.path], [group], 'errNotChanged')
         if (!chk.ok) return chk
         await audit({ op: 'diff', repo: repo.path, file: args.path, group })
@@ -1639,14 +1909,14 @@ export default function () {
           await audit({ op: 'image', repo: repo.path, file: args.path, group: 'commit', hash, side })
           return ok(await imageFromGit(repo, (side === 'old' ? hash + '^' : hash) + ':' + p, mime))
         }
-        const group = args.group === 'staged' ? 'staged' : args.group === 'untracked' ? 'untracked' : 'unstaged'
+        const group = args.group === 'staged' ? 'staged' : args.group === 'untracked' ? 'untracked' : args.group === 'conflicted' ? 'conflicted' : 'unstaged'
         const chk = await checkFilesInGroups(repo, [args.path], [group], 'errNotChanged')
         if (!chk.ok) return chk
         await audit({ op: 'image', repo: repo.path, file: args.path, group, side })
         if (side === 'old') {
-          // 未跟踪文件没有旧版；旧版按组取 index（unstaged）或 HEAD（staged），
-          // rename 旧路径以服务端 status 记录为准
-          if (group === 'untracked') return ok({ image: null })
+          // 未跟踪文件没有旧版；冲突（未合并）路径在 index 里没有 stage 0，取不到旧版；
+          // 旧版按组取 index（unstaged）或 HEAD（staged），rename 旧路径以服务端 status 记录为准
+          if (group === 'untracked' || group === 'conflicted') return ok({ image: null })
           const entry = chk.status[group].find((f) => f.path === args.path)
           const oldPath = saneRepoPath(entry && entry.orig ? entry.orig : args.path)
           if (!oldPath) return ok({ image: null })
@@ -1822,6 +2092,10 @@ export default function () {
       registerRpc('discard', withRepo(async (repo, args) => {
         const files = ((args && args.files) || []).map(String).filter(Boolean)
         if (files.length === 0) return fail(tr('errNoFilesDiscard'))
+        // 注意：这里**有意**不认 'conflicted'（未合并路径对 --ours/--theirs 是歧义，放弃入口
+        // 统一收敛到「中止合并」）。它被归一化成 'unstaged' 后，checkFilesInGroups 又会因为
+        // 冲突文件已从 unstaged 分组移除而拒绝——两道口径共同保证手工构造的 RPC 也放弃不了
+        // 未合并文件。勿“顺手”把 conflicted 加进这个三元链。
         const group = args && args.group === 'staged' ? 'staged' : args && args.group === 'untracked' ? 'untracked' : 'unstaged'
         await audit({ op: 'discard', repo: repo.path, group, files: files.length })
         return await opDiscard(repo, files, group)
@@ -1885,6 +2159,13 @@ export default function () {
       }))
 
       registerRpc('clean', withRepo((repo) => runWriteOp('git.clean', repo, () => opClean(repo))))
+
+      // 中止合并：pull 冲突后恢复工作区的出口（对应 opMergeAbort 的 MERGE_HEAD 前置校验）
+      registerRpc('mergeAbort', withRepo((repo) => runWriteOp('git.merge-abort', repo, () => opMergeAbort(repo))))
+
+      // 完成合并：冲突已全部标记、但解决结果与 HEAD 一致（无暂存差异）时的收尾出口
+      //（对应 opMergeCommit 的两道前置校验）
+      registerRpc('mergeCommit', withRepo((repo) => runWriteOp('git.merge-commit', repo, () => opMergeCommit(repo))))
 
       registerRpc('log', withRepo(async (repo, args) => {
         // 分页读取：--topo-order + --skip/-n，供前端按滚动条动态加载（--graph 不支持 --skip）

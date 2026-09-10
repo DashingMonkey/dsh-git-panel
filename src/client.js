@@ -79,8 +79,10 @@ export default function () {
       // 双形态 RPC：
       //   - 动态 Cordis 包：host.call(method, args)（运行器注入的内置件）
       //   - 文件态：ctx.connection.rpc.call('/git-panel', method, args)
-      //     （@deepseek-ai/dsh-client-connection 的通用 RPC 通道，与 host 半体
-      //       connection.rpc.handle('/git-panel', ...) 配对）
+      //     （@deepseek-ai/dsh-client-connection 的通用 RPC 通道；Host 半体不再用
+      //       connection.rpc.handle 注册，而是按 dsh-client-connection 挂 /api 的方式
+      //       直接占用 webServer 的 /git-panel 前缀路由，信封与信任围栏完全一致，
+      //       见 src/host.js 的 registerHttpChannel）
       // 协议信封为 {ok:true, value} / {ok:false, error:{code,message,details}}；
       // 这里统一摊平为 {ok:true, ...value} / {ok:false, error:<string>}，
       // 下游组件保持读业务字段的旧约定，无需逐处适配。
@@ -190,6 +192,8 @@ body[data-ds-dark-theme] .gp-btn-primary { color: #16181d; text-shadow: none; }
 .gp-count-staged { color: var(--dsw-alias-state-success-primary); }
 .gp-count-unstaged { color: var(--dsw-alias-state-warn-primary); }
 .gp-count-untracked { color: var(--dsw-alias-brand-primary); }
+/* 冲突计数：与提示条同色系，收起/折叠状态下也能一眼看出仓库处于冲突中 */
+.gp-count-conflict { color: var(--dsw-alias-state-warn-primary); font-weight: 600; }
 .gp-spacer { flex: 1; }
 .gp-menu-wrap { position: relative; }
 .gp-menu { position: absolute; right: 0; top: calc(100% + 4px); background: var(--gp-pop-bg); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 120; min-width: 250px; padding: 4px; }
@@ -227,6 +231,8 @@ body[data-ds-dark-theme] .gp-file-row:hover { box-shadow: 0 1px 4px rgba(0,0,0,.
 .gp-file-badge.gp-g-added { color: var(--dsw-alias-state-success-primary); }
 .gp-file-badge.gp-g-modified { color: var(--dsw-alias-state-warn-primary); }
 .gp-file-badge.gp-g-deleted { color: var(--dsw-alias-state-error-primary); }
+/* 冲突（未合并）状态：用 warn 色而非删除色——它等待用户决策，不是既成事实的删除 */
+.gp-file-dot.gp-g-conflict, .gp-file-badge.gp-g-conflict { color: var(--dsw-alias-state-warn-primary); opacity: 1; }
 /* 与抽屉头部同策略：文件名不先收缩（超长才被 max-width 封顶），目录独自让路；
    direction:rtl 让目录省略号落左侧，保留最深层目录（…lib/components）。 */
 .gp-file-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 0 auto; max-width: 58%; color: #333333; }
@@ -247,6 +253,14 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
    会压过本类纯色底（0,1,0），灰底撞静态字色两主题都不可读。与 .gp-btn-primary
    的 hover 同构：底色锁定错误色，仅 filter 提亮。 */
 .gp-btn-danger:hover:not(:disabled) { background: var(--dsw-alias-state-error-primary); filter: brightness(1.12); }
+/* 冲突提示条（仓库卡片内，置顶于变更分组之前）：说明解决动作 + 「完成合并 / 中止合并」出口。
+   底色/描边用 warn 色低透明度叠层，与 .gp-btn-danger 的实心危险按钮形成层级：
+   提示条是「正在发生的状态」，按钮是「会丢东西的动作」。
+   color-mix 前各留一条普通声明兜底（同全文件其余 color-mix 用法）：不支持时仅退化为
+   无叠层，若只写 color-mix 则底色与描边会一起消失、横幅语义整个丢掉。 */
+.gp-conflict-bar { display: flex; align-items: center; gap: 7px; margin: 6px 8px; padding: 7px 9px; border-radius: 6px; font-size: 12.5px; line-height: 1.45; color: var(--dsw-alias-state-warn-primary); background: rgba(215,166,72,.12); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent); box-shadow: inset 0 0 0 1px rgba(215,166,72,.38); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 38%, transparent); }
+.gp-conflict-text { flex: 1 1 auto; min-width: 0; }
+.gp-conflict-abort, .gp-conflict-finish { flex: 0 0 auto; padding: 3px 8px; font-size: 12px; }
 /* 放弃更改确认弹窗：不可恢复提示 + 文件预览列表 */
 .gp-confirm-note { margin-top: 8px; font-size: 12.5px; }
 .gp-confirm-files { margin-top: 8px; max-height: 150px; overflow-y: auto; border: 1px solid var(--gp-border-1); border-radius: 6px; padding: 6px 9px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-all; }
@@ -377,6 +391,10 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 .gp-dr-add .gp-diff-sign { color: var(--dsw-alias-state-success-primary); font-weight: 700; }
 .gp-dr-del .gp-diff-sign { color: var(--dsw-alias-state-error-primary); font-weight: 700; }
 .gp-diff-row.gp-dr-note .gp-diff-code { color: var(--dsw-alias-label-tertiary); font-style: italic; }
+/* 冲突标记行（<<<<<<< / ======= / >>>>>>>）：冲突组是整文件合成的新增 diff，标记行与正文
+   同为绿色就找不到冲突块边界。warn 色 + 浅底，让它从成片绿里跳出来（前一条灰声明兜底）。 */
+.gp-diff-row.gp-dr-mark { background: rgba(215,166,72,.10); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); }
+.gp-diff-row.gp-dr-mark .gp-diff-code { color: var(--dsw-alias-state-warn-primary); font-weight: 600; }
 .gp-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 400; pointer-events: auto; }
 .gp-modal { background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--gp-border-2); border-radius: 10px; width: 1180px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
 .gp-modal-sm { width: 440px; }
@@ -621,7 +639,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
       if (lang !== 'en') lang = 'zh'
       const TEXTS = {
         zh: {
-          groupStaged: '暂存的更改', groupChanges: '更改', groupUntracked: '未跟踪的更改', history: '历史',
+          groupStaged: '暂存的更改', groupChanges: '更改', groupUntracked: '未跟踪的更改', groupConflicted: '冲突（未解决）', history: '历史',
           rulesLoadFailed: '读取规则失败', reading: '(读取中…)', saved: '已保存', saveFailed: '保存失败', saveFailedWith: '保存失败: {e}',
           scopeSwitchFailed: '切换规则来源失败',
           validationNoSys: '校验失败: 缺少 system_prompt', validationNoUser: '校验失败: 缺少 user_context',
@@ -671,6 +689,25 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           resetSoftNote: '将撤销最近一次提交，其更改退回暂存区。此操作改写本地历史。',
           resetHardNote: '将撤销最近一次提交并丢弃其全部更改。此操作不可恢复。',
           cleanNote: '将删除所有未跟踪的文件与目录（git clean -fd）。此操作不可恢复。',
+          conflictBar: '有 {n} 个文件存在冲突，解决后点该行的 ＋ 标记为已解决。',
+          conflictBarResolved: '冲突已全部标记为已解决，可以提交以完成本次合并。',
+          conflictBarNoStaged: '冲突已全部解决，且解决结果与 HEAD 一致（没有暂存内容）。点「完成合并」提交本次合并。',
+          // 有未暂存改动时不能说「与 HEAD 一致」：那种状态下最可能是「解决完又取消了暂存」，
+          // 解决结果正躺在工作区里没进 index——此时点「完成合并」提交出的合并提交不含它。
+          conflictBarUnstaged: '冲突已全部解决，但当前索引没有可提交的内容（解决结果尚未暂存，或暂存后又被取消暂存）。先点该行的 ＋ 再提交；若按当前索引收尾合并，点「完成合并」——工作区里未暂存的改动不会被本次提交包含。',
+          // rebase / cherry-pick / revert：冲突同样进冲突组，但收尾出口不在面板里
+          conflictBarOtherOp: '有 {n} 个文件存在冲突，且当前进行的是 {op}（不是合并）：解决后点该行的 ＋ 标记为已解决，收尾请回终端执行 git {op} --continue（或 git {op} --abort）。',
+          conflictBarOtherOpResolved: '冲突已全部标记为已解决，但当前进行的是 {op}：收尾请回终端执行 git {op} --continue（面板里的「提交」会被 git 当作该 {op} 的提交，并替换掉原提交信息）。',
+          resolveFile: '标记为已解决（git add）', resolveAll: '全部标记为已解决',
+          mergeAbortMenu: '中止合并（放弃本次合并）', mergeAbortTitle: '中止合并',
+          mergeAbortNote: '将放弃本次合并，工作区恢复到合并前状态，冲突标记一并清除。若已解决的文件内容是必要改动，请先自行备份。',
+          mergeAbortOk: '中止合并', mergeAbortDone: '已中止合并', conflictedNTitle: '冲突 {n} 个文件',
+          mergeFinishTitle: '完成合并', mergeFinishDone: '已提交本次合并',
+          // 完成合并用的提交信息取自 .git/MERGE_MSG（git 自己写好的合并摘要），
+          // 悬停即可看到将要提交的那句话
+          mergeFinishTitleWith: '完成合并（提交信息：{m}）',
+          titleResolveFirst: '还有 {n} 个文件未解决，先解决并标记为已解决再提交',
+          titleOtherOp: '{op} 进行中：提交会被 git 当作该 {op} 的提交并替换原提交信息，收尾建议回终端 git {op} --continue',
           loadingMore: '加载更多…', emptyHistory: '暂无提交记录',
           failedWith: '{label}失败: {e}',
           rescan: '重新扫描（并刷新所有仓库状态）', openFolder: '在文件资源管理器中打开工作空间', openFolderFailed: '打开文件夹失败: {e}', openFolderUnavailable: '文件管理器服务不可用',
@@ -684,7 +721,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
         },
         en: {
-          groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', history: 'History',
+          groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', groupConflicted: 'Merge Conflicts', history: 'History',
           rulesLoadFailed: 'Failed to load rules', reading: '(loading…)', saved: 'Saved', saveFailed: 'Save failed', saveFailedWith: 'Save failed: {e}',
           scopeSwitchFailed: 'Failed to switch rules source',
           validationNoSys: 'Validation failed: missing system_prompt', validationNoUser: 'Validation failed: missing user_context',
@@ -734,6 +771,20 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           resetSoftNote: 'Undoes the last commit; its changes return to the staging area. This rewrites local history.',
           resetHardNote: 'Undoes the last commit and discards all of its changes. This action cannot be undone.',
           cleanNote: 'Deletes all untracked files and directories (git clean -fd). This action cannot be undone.',
+          conflictBar: '{n} file(s) have conflicts. Resolve them, then press + on the row to mark resolved.',
+          conflictBarResolved: 'All conflicts are marked resolved; commit to complete this merge.',
+          conflictBarNoStaged: 'All conflicts are resolved and the result matches HEAD, so nothing is staged. Press "Complete Merge" to commit this merge.',
+          conflictBarUnstaged: 'All conflicts are resolved, but the index has nothing to commit (the resolution was never staged, or staged and then unstaged). Press + on the row first; to finish the merge with the current index press "Complete Merge" — unstaged worktree changes are not part of this commit.',
+          conflictBarOtherOp: '{n} file(s) have conflicts and a {op} (not a merge) is in progress: resolve them, then press + on the row to mark resolved, and finish in a terminal with git {op} --continue (or git {op} --abort).',
+          conflictBarOtherOpResolved: 'All conflicts are marked resolved, but a {op} is in progress: finish it in a terminal with git {op} --continue (the panel\'s Commit would be taken as that {op}\'s commit and replace its original message).',
+          resolveFile: 'Mark as resolved (git add)', resolveAll: 'Mark all as resolved',
+          mergeAbortMenu: 'Abort merge (discard this merge)', mergeAbortTitle: 'Abort Merge',
+          mergeAbortNote: 'Discards this merge and restores the worktree to its pre-merge state, clearing the conflict markers. Back up any resolved content you still need first.',
+          mergeAbortOk: 'Abort Merge', mergeAbortDone: 'Merge aborted', conflictedNTitle: '{n} conflicted file(s)',
+          mergeFinishTitle: 'Complete Merge', mergeFinishDone: 'Merge committed',
+          mergeFinishTitleWith: 'Complete Merge (message: {m})',
+          titleResolveFirst: '{n} file(s) are still unresolved; resolve and mark them before committing',
+          titleOtherOp: 'A {op} is in progress: committing is taken as that {op}\'s commit and replaces its original message; prefer git {op} --continue in a terminal',
           loadingMore: 'Loading more…', emptyHistory: 'No commits yet',
           failedWith: '{label} failed: {e}',
           rescan: 'Rescan (also refreshes all repository statuses)', openFolder: 'Open workspace in file explorer', openFolderFailed: 'Failed to open folder: {e}', openFolderUnavailable: 'File manager service unavailable',
@@ -786,6 +837,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
       }
 
       const GROUP_META = {
+        conflicted: { titleKey: 'groupConflicted' },
         staged: { titleKey: 'groupStaged' },
         unstaged: { titleKey: 'groupChanges' },
         untracked: { titleKey: 'groupUntracked' }
@@ -838,7 +890,11 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
       // unified diff 解析：拆出文件头元信息（meta）、@@ 分段（含旧/新行号计数的行序列）、
       // 以及 hunk 之外的杂散行（未跟踪目录列表 / 无 diff / 二进制提示）。
       // 行对象：{ t: 'add'|'del'|'ctx'|'note', o: 旧行号|null, n: 新行号|null, x: 去掉前导符的文本 }
-      function parseDiff(text) {
+      // 冲突标记行（<<<<<<< / ======= / >>>>>>>）：冲突组给的是工作区文件全文的合成 diff，
+      // 整份文件都是新增行，标记行若与正文同色就找不到冲突块的边界在哪。只在 conflicted
+      // 组启用（普通 diff 里 `=======` 可能是 Markdown 下划线之类的正文），单列成 mark 类型。
+      const CONFLICT_MARKER_RE = /^(<{7}|={7}|>{7})/
+      function parseDiff(text, conflicted) {
         const meta = []
         const blocks = []
         let cur = null
@@ -854,8 +910,14 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
             continue
           }
           if (cur) {
-            if (raw.startsWith('+')) { cur.rows.push({ t: 'add', o: null, n: newNo++, x: raw.slice(1) }); adds++ }
-            else if (raw.startsWith('-')) { cur.rows.push({ t: 'del', o: oldNo++, n: null, x: raw.slice(1) }); dels++ }
+            if (raw.startsWith('+')) {
+              const x = raw.slice(1)
+              // mark 行的行号与 add 一致（冲突标记就是文件里的第 n 行），仍计入 adds：
+              // 那是"这份合成 diff 有多少新增行"的口径，与文件行数保持一致
+              if (conflicted && CONFLICT_MARKER_RE.test(x)) cur.rows.push({ t: 'mark', o: null, n: newNo++, x })
+              else cur.rows.push({ t: 'add', o: null, n: newNo++, x })
+              adds++
+            } else if (raw.startsWith('-')) { cur.rows.push({ t: 'del', o: oldNo++, n: null, x: raw.slice(1) }); dels++ }
             else if (raw.startsWith('\\')) cur.rows.push({ t: 'note', o: null, n: null, x: raw })
             else cur.rows.push({ t: 'ctx', o: oldNo++, n: newNo++, x: raw.length ? raw.slice(1) : '' })
             continue
@@ -886,6 +948,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           while (i < rows.length) {
             const r = rows[i]
             if (r.t === 'note') { out.push({ note: r.x }); i++; continue }
+            // 冲突标记行在分栏视图里同样自成整行（左半右半都会被 + 前缀重复一次，
+            // 合成成一对反而看不出边界），保留 mark 标记交给渲染端着色
+            if (r.t === 'mark') { out.push({ note: r.x, mark: true }); i++; continue }
             if (r.t !== 'del' && r.t !== 'add') { pushPair(r, r, false); i++; continue }
             const dels = []
             while (i < rows.length && rows[i].t === 'del') dels.push(rows[i++])
@@ -1383,10 +1448,12 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         }
         const widthDrag = useWidthDrag(dragApply, (w) => savePrefInt('gp-diff-w', 380, 2400, w), () => setResizing(false))
 
-        const parsed = React.useMemo(() => parseDiff(state.text), [state.text])
+        const parsed = React.useMemo(() => parseDiff(state.text, sel.group === 'conflicted'), [state.text, sel.group])
         // 分栏配对按 block 缓存（保留 @@ 分段头边界）；仅 split 模式惰性计算
         const splitPairs = React.useMemo(() => (split ? parsed.blocks.map((b) => ({ hunk: b.hunk, pairs: pairRows([b]) })) : null), [parsed, split])
-        const gl = glyphOf(sel.x, sel.y)
+        // 冲突组与列表行同口径：未合并条目在 porcelain 里是 UU/AA/DD…，直接喂 glyphOf 会得到
+        // 「红色 U」「绿色 A」「红色 D」等与列表行（warn 色 U）不一致的观感
+        const gl = sel.group === 'conflicted' ? { g: 'U', cls: 'gp-g-conflict' } : glyphOf(sel.x, sel.y)
         const { base, dir } = splitPath(sel.path)
         // 面板调宽/窗口变窄时保持抽屉不越过视口左缘
         const wEff = Math.min(drawerW, Math.max(320, Math.round(window.innerWidth - panelW - 48)))
@@ -1403,7 +1470,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         // 渲染（无红绿、无 +/− 符号），只有中段配对与单边行才着色；
         // 修改对带 word 级中段高亮（公共前后缀之外的部分）。
         const renderSplitRow = (pr, i) => {
-          if (pr.note) return React.createElement('div', { key: i, className: 'gp-diff-row gp-dr-note' },
+          if (pr.note) return React.createElement('div', { key: i, className: 'gp-diff-row ' + (pr.mark ? 'gp-dr-mark' : 'gp-dr-note') },
             React.createElement('span', { className: 'gp-diff-code' }, pr.note))
           const l = pr.l, r = pr.r
           const sgd = pr.mod && l && r ? segDiff(l.x, r.x) : null
@@ -1921,8 +1988,12 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           pop)
       }
 
-      // 提交区：仅处理已暂存（staged）文件——生成 / 提交 / 提交并推送都基于 stagedPaths
-      function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus }) {
+      // 提交区：仅处理已暂存（staged）文件——生成 / 提交 / 提交并推送都基于 stagedPaths。
+      // conflictedCount > 0 时提交按钮禁用：git 自己也会拒绝（"Committing is not possible
+      // because you have unmerged files"，实测 exit 128），面板提前把原因写在按钮提示里。
+      // otherOp 不拦提交（实测 rebase / cherry-pick 冲突解决后 git 接受该提交并据此收尾），
+      // 只在提示里说明它会成为该操作的提交、并替换掉原提交信息。
+      function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus, conflictedCount, otherOp }) {
         const [rulesMenuOpen, setRulesMenuOpen] = React.useState(false)
         const [rulesInfo, setRulesInfo] = React.useState(null)
         const [openRules, setOpenRules] = React.useState(false)
@@ -1953,7 +2024,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         // 否则旧循环在后台无限发 generatePoll 且与新循环叠加
         const genAliveRef = React.useRef(true)
         React.useEffect(() => () => { genAliveRef.current = false }, [])
-        const canCommit = message.trim() !== '' && stagedPaths.length > 0 && busy === null
+        const canCommit = message.trim() !== '' && stagedPaths.length > 0 && busy === null && !conflictedCount
         const lineCount = Math.min(6, Math.max(2, (message.match(/\n/g) || []).length + 1))
 
         const doGenerate = async () => {
@@ -2042,7 +2113,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
                 rulesMenu)),
             React.createElement('span', { className: 'gp-staged-hint' }, stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : tr('noStaged'))),
           React.createElement('div', { className: 'gp-commit-actions' },
-            React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: () => doCommit(false), disabled: !canCommit, title: stagedPaths.length === 0 ? tr('titleStageFirst') : fmt(tr('commitTitle'), { n: stagedPaths.length }) },
+            React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: () => doCommit(false), disabled: !canCommit, title: conflictedCount > 0 ? fmt(tr('titleResolveFirst'), { n: conflictedCount }) : otherOp ? fmt(tr('titleOtherOp'), { op: otherOp }) : stagedPaths.length === 0 ? tr('titleStageFirst') : fmt(tr('commitTitle'), { n: stagedPaths.length }) },
               busy === 'commit' ? React.createElement('span', { className: 'gp-spinner' }) : icon('check'),
               busy === 'commit' ? tr('committing') : tr('commit')),
             React.createElement('button', { className: 'gp-btn', onClick: () => doCommit(true), disabled: !canCommit, title: tr('pushTitle') },
@@ -2148,7 +2219,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
               React.createElement('div', { className: 'gp-layout-hint' }, tr('layoutNarrowHint')))))
       }
 
-      // 小型确认弹窗骨架（放弃更改 / Reset / Clean 共用）：warning 图标标题 +
+      // 小型确认弹窗骨架（放弃更改 / Reset / Clean / 中止合并 共用）：warning 图标标题 +
       // 自定义 body + 取消/危险确认按钮；backdrop 点击关闭，Esc 分层由调用方处理
       function ConfirmModal({ title, body, okLabel, busy, onCancel, onOk }) {
         return React.createElement('div', { className: 'gp-modal-backdrop', onClick: (e) => { e.stopPropagation(); onCancel() } },
@@ -2167,7 +2238,8 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
       function useMultiSelect(data, groupsOpen, activeKey, onOpenRow) {
         const [selKeys, setSelKeys] = React.useState(() => new Set())
         const anchorRef = React.useRef(null)
-        // 可见的扁平顺序（staged → unstaged → untracked，收起的组跳过）：Shift 范围选择按它取区间
+        // 可见的扁平顺序（staged → unstaged → untracked，收起的组跳过）：Shift 范围选择按它取区间。
+        // 冲突行不在其中：它不参与多选（未合并路径的批量放弃语义不明，见 onRowClick）
         const flatKeys = React.useMemo(() => {
           const out = []
           if (data) {
@@ -2201,6 +2273,14 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         // 选区/焦点抢占（Shift 框选会带出蓝色选区，在 renderGroup 的 onMouseDown 处理）
         const onRowClick = (e, f, group) => {
           const key = rowKey(group, f.path)
+          // 冲突行不参与多选：批量放弃对未合并路径没有确定语义（批量暂存才是「全部标记
+          // 已解决」，已由分组标题的 ＋ 提供），避免选中后静默无效的假状态。
+          // 修饰键下也不切抽屉——其余分组的 Ctrl/⌘/Shift 点击只做多选、不动抽屉，这里保持一致
+          if (group === 'conflicted') {
+            setSelKeys(new Set())
+            if (!(e.ctrlKey || e.metaKey || e.shiftKey)) onOpenRow(f, group)
+            return
+          }
           if (e.shiftKey) {
             let from = anchorRef.current != null && flatKeys.indexOf(anchorRef.current) >= 0 ? anchorRef.current
               : (activeKey != null && flatKeys.indexOf(activeKey) >= 0 ? activeKey : key)
@@ -2286,8 +2366,15 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         const unstage = (paths) => runWrite('unstage', () => callRpc('unstage', { repoId: repo.id, files: paths, sessionId }))
         // 放弃更改（不可逆）：分组标题 = 放弃全部，文件行 = 放弃单个文件
         const discard = (paths, group) => runWrite('discard', () => callRpc('discard', { repoId: repo.id, files: paths, group, sessionId }))
+        // 完成合并：冲突已全部解决、且解决结果与 HEAD 一致（无暂存差异）时的收尾出口。
+        // 与提交同级（只写一个提交、非破坏性），走直接执行 + toast，不弹确认窗。
+        const finishMerge = () => runWrite('merge-commit', async () => {
+          const res = await callRpc('mergeCommit', { repoId: repo.id, sessionId })
+          if (res && res.ok && !res.summary) res.summary = tr('mergeFinishDone')
+          return res
+        })
         // 分组展开/收起（最左侧 chevron）
-        const [groupsOpen, setGroupsOpen] = React.useState({ staged: true, unstaged: true, untracked: true })
+        const [groupsOpen, setGroupsOpen] = React.useState({ conflicted: true, staged: true, unstaged: true, untracked: true })
         const toggleGroup = (g) => setGroupsOpen((o) => ({ ...o, [g]: !o[g] }))
 
         const openBranchMenu = () => {
@@ -2312,6 +2399,16 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         const totalStaged = data ? data.staged.length : 0
         const totalUnstaged = data ? data.unstaged.length : 0
         const totalUntracked = data ? data.untracked.length : 0
+        const totalConflicted = data && data.conflicted ? data.conflicted.length : 0
+        const mergeInProgress = !!(data && data.mergeInProgress)
+        // rebase / cherry-pick / revert 进行中（host 只在「有冲突」或「HEAD detached」时探测，
+        // 见 repoStatus）：这三者的冲突同样进冲突组，但收尾出口不在面板里，提示条与提交
+        // 按钮的文案都要区分开，否则会把用户引到「提交即完成合并」这条错路上。
+        const otherOp = (data && data.otherOp) || null
+        // 完成合并将使用的提交信息（host 读 .git/MERGE_MSG 的第一行非注释内容）
+        const mergeMessage = (data && data.mergeMessage) || null
+        // 合并已无冲突、但解决结果与 HEAD 一致（无可提交的暂存差异）：此时只有「完成合并」能收尾
+        const finishMergeOnly = mergeInProgress && totalConflicted === 0 && totalStaged === 0
 
         // ===== 多选 / 激活行 / 放弃确认（均需 data，置于其后） =====
         // 激活行 = diff 抽屉正展示的行（同一文件可同时出现在 staged/unstaged 两组，须带组判定）。
@@ -2373,12 +2470,16 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
 
         const renderGroup = (group, list) => {
           list = list || []
-          // 「更改」为空时仍保留标题行（占位提示）；「暂存的更改」「未跟踪的更改」为空时整组隐藏
+          // 「更改」为空时仍保留标题行（占位提示）；其余分组（含冲突组）为空时整组隐藏
           if (list.length === 0 && group !== 'unstaged') return null
           const meta = GROUP_META[group]
           const paths = list.map((f) => f.path)
           const open = groupsOpen[group] !== false
           const isStaged = group === 'staged'
+          // 冲突组：该行的 ＋ 语义是「标记为已解决」（host 对未合并路径执行 git add），
+          // 而放弃更改对未合并路径没有确定语义（--ours/--theirs 对用户是歧义），
+          // 因此冲突行不给放弃按钮，整体出口由下方提示条的「中止合并」提供。
+          const isConflicted = group === 'conflicted'
           const hasItems = list.length > 0
           return React.createElement('div', { className: 'gp-section', key: group },
             React.createElement('div', { className: 'gp-section-title', onClick: () => toggleGroup(group) },
@@ -2386,13 +2487,15 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
               React.createElement('span', { className: 'gp-section-label' }, tr(meta.titleKey)),
               React.createElement('span', { className: 'gp-spacer' }),
               hasItems ? React.createElement('span', { className: 'gp-row-actions' },
-                React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardAll'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); askDiscard(paths, group) } }, icon('discard')),
+                isConflicted ? null : React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardAll'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); askDiscard(paths, group) } }, icon('discard')),
                 isStaged
                   ? React.createElement('button', { className: 'gp-icon-btn', title: tr('unstageAll'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); unstage(paths) } }, icon('minus'))
-                  : React.createElement('button', { className: 'gp-icon-btn', title: fmt(tr('stageAll'), { n: list.length }), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stage(paths) } }, icon('plus'))) : null,
+                  : React.createElement('button', { className: 'gp-icon-btn', title: isConflicted ? tr('resolveAll') : fmt(tr('stageAll'), { n: list.length }), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stage(paths) } }, icon('plus'))) : null,
               hasItems ? React.createElement('span', { className: 'gp-group-count', title: fmt(tr('groupCount'), { n: list.length }) }, list.length) : null),
             !open ? null : list.map((f) => {
-              const gl = glyphOf(f.x, f.y)
+              // DD（双方都删）冲突的解决结果就是删除，保留删除线；其余冲突码上的 U 只是
+              // 「未合并」标记，加删除线会误导（DU/UD 的文件仍带着内容）
+              const gl = isConflicted ? { g: 'U', cls: 'gp-g-conflict', del: f.x === 'D' && f.y === 'D' } : glyphOf(f.x, f.y)
               const { base, dir } = splitPath(f.path)
               const key = rowKey(group, f.path)
               const cls = 'gp-file-row' + (activeKey === key ? ' gp-file-active' : '') + (selKeys.has(key) ? ' gp-file-sel' : '')
@@ -2404,16 +2507,16 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
               },
                 React.createElement('span', { className: 'gp-file-dot ' + gl.cls }, '•'),
                 // D（删除）类型文件：文件名加删除线（见 .gp-file-name-del）；暂存/未暂存组均适用，
-                // 未跟踪组状态恒为 U 不受影响
-                React.createElement('span', { className: 'gp-file-name' + (gl.g === 'D' ? ' gp-file-name-del' : '') }, base),
+                // 未跟踪组状态恒为 U 不受影响；冲突组仅 DD（双方都删）命中
+                React.createElement('span', { className: 'gp-file-name' + (gl.del || gl.g === 'D' ? ' gp-file-name-del' : '') }, base),
                 dir ? React.createElement('span', { className: 'gp-file-dir' }, dir) : null,
                 f.orig ? React.createElement('span', { className: 'gp-file-orig', title: f.orig }, '← ' + (f.orig.replace(/\/+$/, '').split('/').pop() || f.orig)) : null,
                 React.createElement('span', { className: 'gp-spacer' }),
                 React.createElement('span', { className: 'gp-row-actions' },
-                  React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardFile'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); discardFromRow(key, f.path, group) } }, icon('discard')),
+                  isConflicted ? null : React.createElement('button', { className: 'gp-icon-btn gp-icon-btn-discard', title: tr('discardFile'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); discardFromRow(key, f.path, group) } }, icon('discard')),
                   isStaged
                     ? React.createElement('button', { className: 'gp-icon-btn', title: tr('unstage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); unstageFromRow(key, f.path) } }, icon('minus'))
-                    : React.createElement('button', { className: 'gp-icon-btn', title: tr('stage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stageFromRow(key, f.path) } }, icon('plus'))),
+                    : React.createElement('button', { className: 'gp-icon-btn', title: isConflicted ? tr('resolveFile') : tr('stage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stageFromRow(key, f.path) } }, icon('plus'))),
                 React.createElement('span', { className: 'gp-file-badge ' + gl.cls }, gl.g))
             }))
         }
@@ -2448,21 +2551,27 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           onOk: doDiscardConfirmed
         }) : null
 
-        // 危险操作确认弹窗（Reset / Clean）：结构同放弃更改弹窗，Esc 由上方分层处理关闭
+        // 危险操作确认弹窗（Reset / Clean / 中止合并）：结构同放弃更改弹窗，Esc 由上方分层处理关闭
         const DANGER_INFO = {
           'reset-soft': { title: tr('resetSoftTitle'), note: tr('resetSoftNote') },
           'reset-hard': { title: tr('resetHardTitle'), note: tr('resetHardNote') },
-          'clean': { title: tr('cleanTitle'), note: tr('cleanNote') }
+          'clean': { title: tr('cleanTitle'), note: tr('cleanNote') },
+          'merge-abort': { title: tr('mergeAbortTitle'), note: tr('mergeAbortNote') }
         }
         const dangerModal = confirmDanger ? React.createElement(ConfirmModal, {
           title: DANGER_INFO[confirmDanger].title,
           body: React.createElement('div', { className: 'gp-confirm-note gp-danger' }, DANGER_INFO[confirmDanger].note),
-          okLabel: tr('dangerRun'), busy,
+          okLabel: confirmDanger === 'merge-abort' ? tr('mergeAbortOk') : tr('dangerRun'), busy,
           onCancel: () => setConfirmDanger(null),
           onOk: () => {
             const op = confirmDanger
             setConfirmDanger(null)
             if (op === 'clean') runWrite('clean', () => callRpc('clean', { repoId: repo.id, sessionId }))
+            else if (op === 'merge-abort') runWrite('merge-abort', async () => {
+              const res = await callRpc('mergeAbort', { repoId: repo.id, sessionId })
+              if (res && res.ok && !res.summary) res.summary = tr('mergeAbortDone')
+              return res
+            })
             else runWrite('reset', () => callRpc('reset', { repoId: repo.id, mode: op === 'reset-hard' ? 'hard' : 'soft', sessionId }))
           }
         }) : null
@@ -2488,6 +2597,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           React.createElement('button', { className: 'gp-menu-item', onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); runWrite('stash', () => callRpc('stashPush', { repoId: repo.id, message: 'stash @ ' + new Date().toLocaleString(), sessionId })) } }, tr('moreStash')),
           React.createElement('button', { className: 'gp-menu-item', onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); runWrite('stash-pop', () => callRpc('stashPop', { repoId: repo.id, ref: null, sessionId })) } }, tr('moreStashPop')),
           React.createElement('div', { className: 'gp-menu-sep' }),
+          // 合并进行中才出现：pull 冲突后「中止合并」是唯一出口，但它同样会丢弃已解决的
+          // 内容，仍走确认弹窗（与 Reset/Clean 同级）
+          mergeInProgress ? React.createElement('button', { className: 'gp-menu-item', disabled: !!busy, onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); setConfirmDanger('merge-abort') } }, tr('mergeAbortMenu')) : null,
           // 危险操作：弹确认窗（与放弃更改同款），确认后执行
           React.createElement('button', { className: 'gp-menu-item', disabled: !!busy, onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); setConfirmDanger('reset-soft') } }, tr('moreResetSoft')),
           React.createElement('button', { className: 'gp-menu-item', disabled: !!busy, onClick: () => { setMoreMenu((x) => ({ ...x, open: false })); setConfirmDanger('reset-hard') } }, tr('moreResetHard')),
@@ -2500,6 +2612,8 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           data ? React.createElement('span', { className: 'gp-branch' }, icon('branch', 12), data.branch) : null,
           data && data.aheadBehind ? React.createElement('span', { className: 'gp-count', title: fmt(tr('behindAhead'), { b: data.aheadBehind.behind, a: data.aheadBehind.ahead }) }, icon('arrowDown', 12), data.aheadBehind.behind, ' ', icon('arrowUp', 12), data.aheadBehind.ahead) : null,
           data && totalStaged > 0 ? React.createElement('span', { className: 'gp-count gp-count-staged', title: fmt(tr('stagedNTitle'), { n: totalStaged }) }, icon('dot', 7), totalStaged) : null,
+          // 冲突计数放在三组计数之前：折叠面板时它是唯一还能看见的冲突信号
+          data && totalConflicted > 0 ? React.createElement('span', { className: 'gp-count gp-count-conflict', title: fmt(tr('conflictedNTitle'), { n: totalConflicted }) }, icon('warning', 12), totalConflicted) : null,
           data && totalUnstaged > 0 ? React.createElement('span', { className: 'gp-count gp-count-unstaged', title: fmt(tr('unstagedNTitle'), { n: totalUnstaged }) }, icon('dot', 7), totalUnstaged) : null,
           data && totalUntracked > 0 ? React.createElement('span', { className: 'gp-count gp-count-untracked', title: fmt(tr('untrackedNTitle'), { n: totalUntracked }) }, icon('dot', 7), totalUntracked) : null,
           React.createElement('span', { className: 'gp-spacer' }),
@@ -2519,9 +2633,29 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           React.createElement('div', null,
             status.loading ? React.createElement('div', { className: 'gp-empty' }, tr('loadingStatus')) : status.error ? React.createElement('div', { className: 'gp-empty' }, status.error) :
               React.createElement('div', null,
-                React.createElement(CommitArea, { repo, sessionId, stagedPaths, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus }),
+                React.createElement(CommitArea, { repo, sessionId, stagedPaths, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus, conflictedCount: totalConflicted, otherOp }),
                 data && data.statusError ? React.createElement('div', { className: 'gp-empty gp-danger' }, fmt(tr('gitStatusFailed'), { e: data.statusError })) : null,
-                !(data && data.statusError) && totalStaged + totalUnstaged + totalUntracked === 0 ? React.createElement('div', { className: 'gp-empty', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 } }, icon('check', 13), tr('treeClean')) : null,
+                // 冲突提示条：未解决冲突 / 合并进行中 / rebase 等进行中时出现，给出动作说明 + 出口按钮。
+                // 「完成合并」只在「合并进行中且冲突已全部解决、暂存为空」时出现——那种状态下解决
+                // 结果与 HEAD 一致，git status 完全为空（文件既不在冲突组也不在暂存组），提交按钮
+                // 因此点不下去，而 git 本身允许直接 commit 收尾（见 host opMergeCommit）。
+                // 同一状态还有第二种来路：解决后又取消了暂存——此时解决结果在工作区却没进 index，
+                // 所以文案要按 totalUnstaged 分流，不能一律宣称「与 HEAD 一致」。
+                // rebase / cherry-pick / revert 冲突（otherOp）不给「完成合并」也不给「中止合并」：
+                // 它们的收尾出口（--continue / --skip / --abort）不在面板里，只做指引。
+                (totalConflicted > 0 || mergeInProgress || otherOp) ? React.createElement('div', { className: 'gp-conflict-bar' },
+                  icon('warning', 14),
+                  React.createElement('span', { className: 'gp-conflict-text' },
+                    totalConflicted > 0
+                      ? (otherOp ? fmt(tr('conflictBarOtherOp'), { n: totalConflicted, op: otherOp }) : fmt(tr('conflictBar'), { n: totalConflicted }))
+                      : otherOp ? fmt(tr('conflictBarOtherOpResolved'), { op: otherOp })
+                        : finishMergeOnly ? (totalUnstaged > 0 ? tr('conflictBarUnstaged') : tr('conflictBarNoStaged'))
+                          : tr('conflictBarResolved')),
+                  finishMergeOnly ? React.createElement('button', { className: 'gp-btn gp-btn-primary gp-conflict-finish', title: mergeMessage ? fmt(tr('mergeFinishTitleWith'), { m: mergeMessage }) : tr('mergeFinishTitle'), disabled: !!busy, onClick: finishMerge }, busy === 'merge-commit' ? tr('mergeFinishTitle') + '…' : tr('mergeFinishTitle')) : null,
+                  mergeInProgress ? React.createElement('button', { className: 'gp-btn gp-btn-danger gp-conflict-abort', title: tr('mergeAbortMenu'), disabled: !!busy, onClick: () => setConfirmDanger('merge-abort') }, busy === 'merge-abort' ? tr('mergeAbortTitle') + '…' : tr('mergeAbortTitle')) : null) : null,
+                !(data && data.statusError) && totalStaged + totalUnstaged + totalUntracked + totalConflicted === 0 ? React.createElement('div', { className: 'gp-empty', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 } }, icon('check', 13), tr('treeClean')) : null,
+                // 冲突组置顶：它决定后续能不能提交，优先于常规三组
+                renderGroup('conflicted', data && data.conflicted),
                 renderGroup('staged', data && data.staged),
                 renderGroup('unstaged', data && data.unstaged),
                 renderGroup('untracked', data && data.untracked)),
@@ -2729,7 +2863,10 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
 
         // 自动刷新：外部（当前对话框修改代码、编辑器保存、其他工具改动等）导致工作区
         // 变化时自动刷新仓库状态。轮询 status 并比对指纹（branch/ahead/staged/unstaged/
-        // untracked），有变化则触发对应仓库的定向刷新（bump refreshTick）。
+        // untracked/conflicted/mergeInProgress/otherOp），有变化则触发对应仓库的定向刷新（bump refreshTick）。
+        // conflicted 与 mergeInProgress 必须入指纹：冲突发生时 staged/unstaged 可能全为空，
+        // 只有这两个字段变化（外部终端里 pull/merge 出冲突正是该场景）；otherOp 同理——
+        // rebase 冲突被外部解决后 conflicted 变空、而 rebase 仍在进行，只有它能反映这段过渡。
         const autoFpRef = React.useRef({})
         React.useEffect(() => {
           if (!s.panelOpen) return
@@ -2743,7 +2880,7 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
               for (const r of list) {
                 const res = await callRpc('status', { repoId: r.id }).catch(() => null)
                 if (!res || !res.ok) continue
-                const fp = [res.branch, res.aheadBehind, res.staged, res.unstaged, res.untracked]
+                const fp = [res.branch, res.aheadBehind, res.staged, res.unstaged, res.untracked, res.conflicted, res.mergeInProgress, res.otherOp]
                   .map((x) => (Array.isArray(x) ? x.map((f) => ((f && f.path) || '') + ((f && f.orig) || '')).join('\u0000') : x === null ? 'null' : x && typeof x === 'object' ? JSON.stringify(x) : String(x)))
                   .join('\u001f')
                 const prev = autoFpRef.current[r.id]

@@ -64,7 +64,17 @@ const indexJs = `// 由 scripts/build.mjs 生成，请勿手改；源文件：sr
 import hostFactory from './host.js'
 
 const name = 'git-panel'
-const inject = ['fs', 'subprocess', 'connection']
+// inject 是 fiber 级硬依赖：缺一项则本插件永不激活。
+//   fs / subprocess —— git 执行层与文件读写。
+//   connection      —— 复用其 requestRejection（浏览器信任围栏 + 会话 cookie 校验）。
+//   webServer       —— 必需：Host 半体直接占用 webServer 的 /git-panel 前缀路由
+//                      （见 src/host.js 的 registerHttpChannel）。
+//                      曾用 connection.rpc.handle 注册，但该实现内部要求
+//                      「调用方 fiber 的 store 能解析 webServer」，而它拿到的 ctx 是
+//                      cordis 的 shadow 上下文（fiber 指向 connection 自己的 fiber），
+//                      属性读取必抛 cannot get property "webServer" without inject，
+//                      装载期整棵插件树 failed to load → dsh 启动失败。
+const inject = ['fs', 'subprocess', 'connection', 'webServer']
 
 function apply(ctx, cfg) {
   // host.js 的函数形态工厂每次返回全新插件对象（内部闭包状态独立）

@@ -120,10 +120,52 @@
 - ⋯ 更多：推送、Stash push / pop（列表展示已有 stash）、Reset `--soft|--hard HEAD~1`、
   Clean untracked。
 
+## 合并冲突
+
+`git status` 的未合并条目（`UU/AA/DD/UA/DU/AU/UD`）在 index 里带三个阶段，既不是
+「已暂存」也不是「未暂存的改动」，因此单独成组，不再同时出现在暂存/未暂存两组里：
+
+- **冲突分组置顶**（含仓库头部的冲突计数徽标，卡片折叠时也能看见），该组的 ＋ 即
+  `git add <path>` = 标记为已解决；解决后文件进入「暂存的更改」，照常提交即完成本次合并。
+  若解决结果与 HEAD 完全一致（例如整份取 ours），文件不会出现在任何分组里（index 相对
+  HEAD 没有差异），此时用提示条的「完成合并」收尾（见下）。
+- **冲突文件行不给放弃按钮**：对未合并路径，`--ours/--theirs` 语义对用户是歧义，
+  放弃入口统一收敛到下面的整体出口。Host 端 `discard` 同样拒绝未合并路径（分组名归一化
+  与变更集校验两道口径都不认 `conflicted`），手工构造的 RPC 也放弃不了冲突文件。
+- **提示条 + 中止合并**：只要有未解决冲突或 `MERGE_HEAD` 存在（含「冲突已全部标记但
+  未提交」），卡片顶部显示提示条；存在 `MERGE_HEAD` 时提示条右侧给出「中止合并」按钮，
+  执行 `git merge --abort` 把工作区恢复到合并前（走与 Reset/Clean 同级的确认弹窗，
+  `⋯ 更多` 里也有同一入口）。stash pop 之类不产生 `MERGE_HEAD` 的冲突只提示解决方式。
+- **完成合并（冲突已解决但无暂存差异）**：冲突全部标记为已解决、且解决结果与 HEAD 一致
+  时 `git status` 完全为空，提交按钮（要求 staged 非空）点不下去；此时提示条改文案并给出
+  「完成合并」按钮（悬停可见 git 将使用的提交信息，即 `MERGE_MSG`），执行
+  `git commit --no-edit` 完成合并。它与提交同级——只写一个提交、非破坏性，不弹确认窗。
+  若解决结果被**取消暂存**（或从未暂存），工作区里虽有内容但 index 与 HEAD 一致，提示条
+  会改说「索引没有可提交的内容」而不是宣称「与 HEAD 一致」；此时先点该行的 ＋ 再提交，
+  或按当前索引收尾——未暂存的改动不会进入该合并提交，提交后的 toast 也会写明还有几个
+  未暂存文件未被包含。
+- **rebase / cherry-pick / revert 冲突**：未合并条目同样进冲突组、同样用 ＋ 标记为已解决，
+  但这三种状态不产生 `MERGE_HEAD`，所以面板不给「中止合并」也不给「完成合并」，提示条改说
+  明「当前进行的是 rebase/cherry-pick/revert，收尾请回终端 `--continue` / `--abort`」
+  （Host 侧靠 `REBASE_HEAD / CHERRY_PICK_HEAD / REVERT_HEAD` 判定，只在有冲突或 HEAD
+  detached 时探测）。面板里点「提交」在 cherry-pick/rebase 下会被 git 接受并据此收尾，
+  但会用你填的提交信息替换掉原提交信息，提交按钮的悬停提示会写明这点。
+- **未解决冲突时不给提交**：提交按钮在有未解决冲突时禁用并写明原因；Host 端 `opCommit`
+  在提交前也校验一次，直接返回「还有 n 个文件未解决」，不再把 git 的
+  "Committing is not possible because you have unmerged files" 原文抛给用户。
+- **冲突文件 diff**：不走 git 的组合 diff（`diff --cc` 的双列前缀前端解析不了），
+  直接给工作区文件全文——里面本就带 `<<<<<<< / ======= / >>>>>>>` 标记，标记行在抽屉里
+  单独用 warn 色高亮（整份文件都是新增行，标记与正文同色就找不到冲突块边界）。
+- Pull 遇冲突时错误文案直接给出未解决文件数；合并进行中再次 Pull 会快速失败并提示先
+  解决或用「中止合并」，不再抛 git 的 "You have not concluded your merge" 原文。
+
 ## 审计日志
 
-- **无审批门**：写操作（commit/pull/push/switch/stash/reset/clean/discard）由面板用户
-  显式点击触发后直接执行（类似 VS Code），无额外放行条件、不弹确认窗。
+- **无审批门**：写操作（commit/pull/push/switch/stash/reset/clean/discard/merge-abort/
+  merge-commit）由面板用户显式点击触发后直接执行，Host 端没有第二道放行条件（与 VS Code
+  同侧重点）；破坏性操作（`reset --hard`、Clean、放弃更改、中止合并）由 Client 弹一次确认窗
+  ——前三者在窗内标注不可恢复，中止合并则提示先备份已解决的内容（它丢弃的是本次合并与
+  解决成果，已提交的历史不受影响）。
 - 写操作与其结果（ok/fail）写入 `$DSH_HOME/git-panel/logs/git-YYYY-MM-DD.log`
   （`[ISO时间] key=value` 格式；写入经 promise 链串行化防并发丢行；条目含 scan /
   diff / generate / rules-save / rules-reset / ok:git.* / fail:git.* 等）。

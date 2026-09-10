@@ -3,9 +3,12 @@
 前置要求：目标机器可运行 `npx @deepseek-ai/dsh web`；`git` 在 PATH 中；建议 Windows（两处 Windows 专用探测在非 Windows 上自动降级，不影响核心功能）。
 
 构建产物 `lib/` 由 `scripts/build.mjs` 从 `src/` 生成：
-`lib/index.js`（Host 半体，声明 `inject: ['fs','subprocess','connection']`）与
+`lib/index.js`（Host 半体，声明 `inject: ['fs','subprocess','connection','webServer']`）与
 `lib/client.js`（浏览器 ModuleLoader bundle，声明 `inject: ['slots','connection']`）。
-Host↔Client 经 `ctx.connection.rpc` 通道（`/git-panel`）通信。
+Host↔Client 经 `/git-panel` HTTP RPC 通道通信：Host 半体直接占用 `webServer` 的
+`/git-panel` 前缀路由（见 `src/host.js` 的 `registerHttpChannel`），浏览器信任围栏与会话
+cookie 校验复用 `connection.requestRejection`，Client 侧仍走
+`ctx.connection.rpc.call('/git-panel', method, args)`（信封一致，无需适配）。
 
 包声明了 `dsh.bundle.patch`（组合包），因此同时支持官方 `dsh plugin` 机制与
 无 pnpm 环境的复制式安装，按你的环境任选其一。

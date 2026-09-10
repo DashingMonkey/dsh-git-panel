@@ -13,8 +13,9 @@
 # 说明：动态 Cordis 包进程重启即失，此文件用于跨会话 / 跨重启持久化装载。
 # 与 package.json 的 dsh.client 声明配合，Client 半体会被 dsh.client 扫描并
 # 作为浏览器插件打包进 Web 启动图。
-# 注意：通信层当前依赖动态包运行器内置件（harness.handle / host.call），
-# 文件态 loader 经 ctx.connection.rpc 适配（见 docs/architecture.md）。
+# 注意：通信层双形态——动态包走运行器内置件（harness.handle / host.call）；
+# 文件态（本文件即文件态装载）Host 半体直接占用 webServer 的 /git-panel 前缀路由，
+# Client 侧走 ctx.connection.rpc.call（信封一致，见 docs/architecture.md 的传输层一节）。
 # 下方 scan* 配置键经 apply(ctx, config) 传入 src/host.js 生效；
 # 动态包形态无 config，扫描上限用默认值。
 

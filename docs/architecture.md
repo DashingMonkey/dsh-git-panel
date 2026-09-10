@@ -2,13 +2,39 @@
 
 ## 架构与设计约束
 
-插件分 Host / Client 两个半体，经 `ctx.connection.rpc` 通道（`/git-panel`）通信：
+插件分 Host / Client 两个半体，经 `/git-panel` HTTP RPC 通道通信：
 
 - **Host 半体**（`src/host.js`）：git 执行层、仓库发现（BFS + 内存/磁盘两级扫描缓存，
   命中即回、后台静默重扫 self-heal）、规则读写、审计日志、LLM 生成、
   面向 Client 的 JSON RPC；
 - **Client 半体**（`src/client.js`）：面板全部 UI（`React.createElement`，无 JSX），
   Slot 注入 + 样式 + zh/en 文案。
+
+传输层（`registerHttpChannel`）：Host 半体用 `ctx.effect(() => registerHttpChannel(...))`
+直接占用 `webServer` 的 `/git-panel` 前缀路由；浏览器信任围栏与会话 cookie 校验复用
+`ctx.get('connection').requestRejection(req)`；请求/响应信封与
+`dsh-client-connection` 的 `rpcFetchHandler` 一致
+（入 `{type:'client-request', rpcId, method, payload}`，出 `{type:'server-response', rpcId, result}`），
+因此 Client 侧 `ctx.connection.rpc.call('/git-panel', method, args)` 无需任何适配。
+
+围栏一律 **fail closed**：`connection` 服务或 `requestRejection` 不可用、以及围栏自身抛错
+三种情况都返回 403。DSH 内部 API 变更时若放行，`/git-panel` 会静默变成无鉴权端点。
+
+相对参考实现（`rpcFetchHandler` + `bridge`）的有意差异（都写在 `registerHttpChannel` 头部注释里）：
+围栏**先行**于 method / content-type / 端点判断（未认证请求不该从 405/415/404 的差异里推断出端点存在）、
+非 POST 答 405（参考实现在 fetch 层答 404）、413 附 `connection: close` 并销毁请求、
+入站体积上限 32MB（参考实现默认 300MB，而本通道只收小型 JSON 请求）；
+保持一致的是：content-type 必须 `application/json`（否则 415）、body 不是 JSON 答 400、
+**信封不合法答 200 + 错误信封**（浏览器端 `rpc.call` 对非 2xx 一律抛传输错误，只有信封才能
+把"请求不合法"作为可读错误交回调用方）。
+
+> **不要改回 `connection.rpc.handle('/git-panel', handler)`**：该实现内部是
+> `owner.effect(() => owner.webServer.register(route))`，其中的 `owner` 是 cordis 给
+> connection 服务实例的 shadow 上下文，其 `fiber` 指向 connection 插件自己的 fiber
+> （store 为 `connection/credentials/webRuntime`），而非本插件的 fiber（store 里有
+> `webServer`）。在 DSH 0.1.5-alpha.1 的 cordis 上实测：装载期整棵插件树被判
+> `failed to load`（报错 `cannot get property "webServer" without inject`），
+> **dsh 直接启动失败**（本插件 inject 里加 `webServer` 也无效——被读的不是本插件的上下文）。
 
 针对 DSH Web 环境的设计取舍：
 
@@ -49,8 +75,8 @@ Toast 通知栈。
 
 运行时全部使用 DSH 内置服务，**零新增 npm 依赖**：
 Host `subprocess / fs / llm / settings / sandboxPolicy / agentDefaultModel / timer /
-connection`（`fs`/`subprocess`/`connection` 为文件态 inject 硬依赖，其余 `ctx.get`
-可选读取，缺失时插件降级）；Client `slots / connection / workspaces / locale / timer`
+connection / webServer`（`fs`/`subprocess`/`connection`/`webServer` 为文件态 inject 硬依赖，
+其余 `ctx.get` 可选读取，缺失时插件降级）；Client `slots / connection / workspaces / locale / timer`
 （`slots`/`connection` 为 bundle inject 硬依赖）；主题走 `--dsw-*` CSS 变量。
 
 ## 本地开发
