@@ -265,6 +265,11 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
 .gp-confirm-note { margin-top: 8px; font-size: 12.5px; }
 .gp-confirm-files { margin-top: 8px; max-height: 150px; overflow-y: auto; border: 1px solid var(--gp-border-1); border-radius: 6px; padding: 6px 9px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-all; }
 .gp-commit-area { padding: 9px 10px 10px; border-bottom: 1px solid var(--gp-border-1); background: var(--dsw-alias-bg-layer-1); }
+/* 生成中在提交区顶边扫过一条不高调的光带：整个提交区都在「呼吸」，
+   即使文字还没吐出来也能一眼看出在跑（比只在角落放个小圆点明显得多）。
+   3px 不影响下面的输入框，is-generating 类只在生成期间挂上。 */
+.gp-commit-area.gp-generating::before { content: ''; display: block; height: 2px; margin: -9px -10px 7px; background: linear-gradient(90deg, transparent, var(--dsw-alias-brand-primary), transparent); background-size: 45% 100%; background-repeat: no-repeat; animation: gp-sweep 1.35s linear infinite; }
+@keyframes gp-sweep { from { background-position: -45% 0; } to { background-position: 145% 0; } }
 .gp-textarea { width: 100%; resize: none; border: 1px solid var(--gp-border-2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); padding: 7px 9px; font-size: 13px; line-height: 1.5; font-family: inherit; min-height: 58px; max-height: 138px; }
 .gp-textarea:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .gp-commit-row { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; gap: 8px; }
@@ -272,6 +277,13 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
 .gp-commit-actions { display: flex; gap: 6px; margin-top: 8px; }
 .gp-commit-actions .gp-btn { flex: 1; padding: 6px 12px; font-weight: 600; }
 .gp-staged-hint { font-size: 12px; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
+/* 终止生成：占位切换（生成中把「生成」换成它），固定最小宽度让两个状态的按钮等宽，
+   右侧 .gp-staged-hint 不会随之左右抖动 */
+.gp-stop-btn { min-width: 84px; }
+/* 生成进行中的存活指示：转圈 + 「生成中 12s」。
+   转圈复用 .gp-spinner，和原先「⟳ 生成中…」按钮是同一个视觉语言；
+   秒数靠已有的轮询（120ms）刷新，不需要额外定时器 */
+.gp-gen-progress { font-size: 11.5px; color: var(--dsw-alias-brand-primary); white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .gp-history-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; cursor: pointer; user-select: none; border-top: 1px solid var(--gp-border-1); font-size: 13px; color: var(--dsw-alias-label-secondary); }
 .gp-history-head:hover { color: var(--dsw-alias-label-primary); }
 .gp-history-body { display: flex; padding: 6px 8px 10px; border-top: 1px solid var(--gp-border-1); height: 470px; }
@@ -561,6 +573,10 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         history: { f: ['M7.99909 3C10.7605 3 12.9991 5.23858 12.9991 8C12.9991 10.7614 10.7605 13 7.99909 13C5.39117 13 3.2491 11.003 3.0195 8.45512C2.99471 8.1801 2.75167 7.97723 2.47664 8.00202C2.20161 8.0268 1.99875 8.26985 2.02353 8.54488C2.29916 11.6035 4.86898 14 7.99909 14C11.3128 14 13.9991 11.3137 13.9991 8C13.9991 4.68629 11.3128 2 7.99909 2C6.20656 2 4.59815 2.78613 3.49909 4.03138V2.5C3.49909 2.22386 3.27524 2 2.99909 2C2.72295 2 2.49909 2.22386 2.49909 2.5V5.5C2.49909 5.77614 2.72295 6 2.99909 6H3.08812C3.09498 6.00014 3.10184 6.00014 3.10868 6H5.99909C6.27524 6 6.49909 5.77614 6.49909 5.5C6.49909 5.22386 6.27524 5 5.99909 5H3.99863C4.91128 3.78495 6.36382 3 7.99909 3ZM7.99909 5.5C7.99909 5.22386 7.77524 5 7.49909 5C7.22295 5 6.99909 5.22386 6.99909 5.5V8.5C6.99909 8.77614 7.22295 9 7.49909 9H9.49909C9.77524 9 9.99909 8.77614 9.99909 8.5C9.99909 8.22386 9.77524 8 9.49909 8H7.99909V5.5Z'] },
         warning: { f: ['M14.831 11.965L9.206 1.714C8.965 1.274 8.503 1 8 1C7.497 1 7.035 1.274 6.794 1.714L1.169 11.965C1.059 12.167 1 12.395 1 12.625C1 13.383 1.617 14 2.375 14H13.625C14.383 14 15 13.383 15 12.625C15 12.395 14.941 12.167 14.831 11.965ZM13.625 13H2.375C2.168 13 2 12.832 2 12.625C2 12.561 2.016 12.5 2.046 12.445L7.671 2.195C7.736 2.075 7.863 2 8 2C8.137 2 8.264 2.075 8.329 2.195L13.954 12.445C13.984 12.501 14 12.561 14 12.625C14 12.832 13.832 13 13.625 13ZM8.75 11.25C8.75 11.664 8.414 12 8 12C7.586 12 7.25 11.664 7.25 11.25C7.25 10.836 7.586 10.5 8 10.5C8.414 10.5 8.75 10.836 8.75 11.25ZM7.5 9V5.5C7.5 5.224 7.724 5 8 5C8.276 5 8.5 5.224 8.5 5.5V9C8.5 9.276 8.276 9.5 8 9.5C7.724 9.5 7.5 9.276 7.5 9Z'] },
         discard: { f: ['M3.00098 2.5C3.00098 2.22386 3.22483 2 3.50098 2C3.77712 2 4.00098 2.22386 4.00098 2.5V6.34262L7.17202 3.17157C8.73412 1.60948 11.2668 1.60948 12.8289 3.17157C14.391 4.73367 14.391 7.26633 12.8289 8.82843L7.80375 13.8536C7.60849 14.0488 7.2919 14.0488 7.09664 13.8536C6.90138 13.6583 6.90138 13.3417 7.09664 13.1464L12.1218 8.12132C13.2933 6.94975 13.2933 5.05025 12.1218 3.87868C10.9502 2.70711 9.0507 2.70711 7.87913 3.87868L4.75781 7H8.50098C8.77712 7 9.00098 7.22386 9.00098 7.5C9.00098 7.77614 8.77712 8 8.50098 8H3.60098C3.26961 8 3.00098 7.73137 3.00098 7.4V2.5Z'] },
+        // 终止生成：圆环 + 实心方块的媒体控件约定（比 X 更准确——X 是「关闭/丢弃」，
+        // 而这里只是中断，已生成内容会保留）。圆环用 c 描边、方块用 f 实心两元素叠加，
+        // 不需要 fill-rule/evenodd（见 Icon 的渲染方式）。
+        stop: { c: [[8, 8, 6.1, 0]], f: ['M6.2 5.7H9.8C10.0761 5.7 10.3 5.92386 10.3 6.2V9.8C10.3 10.0761 10.0761 10.3 9.8 10.3H6.2C5.92386 10.3 5.7 10.0761 5.7 9.8V6.2C5.7 5.92386 5.92386 5.7 6.2 5.7Z'] },
         // diff 抽屉头部视图切换：分栏 / 单栏 / 全文
         split: { f: ['M12.5 1H3.5C2.122 1 1 2.122 1 3.5V12.5C1 13.878 2.122 15 3.5 15H12.5C13.878 15 15 13.878 15 12.5V3.5C15 2.122 13.878 1 12.5 1ZM2 12.5V3.5C2 2.673 2.673 2 3.5 2H7.5V14H3.5C2.673 14 2 13.327 2 12.5ZM14 12.5C14 13.327 13.327 14 12.5 14H8.5V2H12.5C13.327 2 14 2.673 14 3.5V12.5Z'] },
         unified: { f: ['M2 3.5C2 3.224 2.224 3 2.5 3H10.5C10.776 3 11 3.224 11 3.5C11 3.776 10.776 4 10.5 4H2.5C2.224 4 2 3.776 2 3.5ZM13.5 6H2.5C2.224 6 2 6.224 2 6.5C2 6.776 2.224 7 2.5 7H13.5C13.776 7 14 6.776 14 6.5C14 6.224 13.776 6 13.5 6ZM9.5 9H2.5C2.224 9 2 9.224 2 9.5C2 9.776 2.224 10 2.5 10H9.5C9.776 10 10 9.776 10 9.5C10 9.224 9.776 9 9.5 9Z', 'M2.5 12H11.5C11.776 12 12 12.224 12 12.5C12 12.776 11.776 13 11.5 13H2.5C2.224 13 2 12.776 2 12.5C2 12.224 2.224 12 2.5 12Z'] },
@@ -670,6 +686,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           genModelCurrent: '生成模型: {m}', genModelThinking: '思考: {e}',
           genModelDefaultMark: '（默认）', genModelThinkingParen: '（思考: {e}）', copied: '已复制', copyFailed: '复制失败',
           stagedCount: '已暂存 {n} 个文件', noStaged: '暂无暂存文件', generate: '生成', generating: '生成中…', rules: '规则',
+          genStop: '停止', genStopping: '停止中…', genStopTitle: '终止本次生成（已生成的内容会保留）',
+          genStopped: '已停止生成，已生成的内容已保留', genStopTooLate: '生成已完成，未中断',
+          genProgress: '生成中 {s}s',
           commit: '提交', committing: '提交中…', pushing: '推送中…', commitAndPush: '提交并推送',
           titleStageFirst: '先用文件右侧的 + 暂存文件', commitTitle: 'git commit（仅已暂存的 {n} 个文件）', pushTitle: '提交成功后推送当前分支',
           loadingStatus: '读取状态…', statusLoadFailed: '读取状态失败', gitStatusFailed: 'git status 失败：{e}', treeClean: '工作区干净，没有变更',
@@ -752,6 +771,9 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           genModelCurrent: 'Generation model: {m}', genModelThinking: 'thinking: {e}',
           genModelDefaultMark: ' (default)', genModelThinkingParen: ' (thinking: {e})', copied: 'Copied', copyFailed: 'Copy failed',
           stagedCount: '{n} files staged', noStaged: 'No staged files', generate: 'Generate', generating: 'Generating…', rules: 'Rules',
+          genStop: 'Stop', genStopping: 'Stopping…', genStopTitle: 'Abort this generation (generated content is kept)',
+          genStopped: 'Generation stopped; the content produced so far was kept', genStopTooLate: 'Generation already finished; nothing to abort',
+          genProgress: 'generating {s}s',
           commit: 'Commit', committing: 'Committing…', pushing: 'Pushing…', commitAndPush: 'Commit & Push',
           titleStageFirst: 'Stage files first with +', commitTitle: 'git commit (only {n} staged files)', pushTitle: 'Commits, then pushes the current branch',
           loadingStatus: 'Loading status…', statusLoadFailed: 'Failed to load status', gitStatusFailed: 'git status failed: {e}', treeClean: 'Working tree clean',
@@ -2023,13 +2045,69 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
         // 卸载中断标志：doGenerate 的轮询循环在组件卸载（面板关闭/重挂载）后必须停止，
         // 否则旧循环在后台无限发 generatePoll 且与新循环叠加
         const genAliveRef = React.useRef(true)
-        React.useEffect(() => () => { genAliveRef.current = false }, [])
+        // 当前生成任务 id：doGenerate 里是局部变量，停止按钮够不着，必须放到 ref 上。
+        // 同一面板实例同一时刻只会有一个在跑的生成（busy 把生成按钮锁住了）。
+        const genIdRef = React.useRef(null)
+        // 已点停止、等 host 确认的过渡态：与 busy 分开——点击后按钮立刻变「停止中…」，
+        // 但 busy 仍保持 'generate'，否则按钮会瞬间跳回「生成」让人以为没生效而反复点击
+        const [cancelling, setCancelling] = React.useState(false)
+        // 生成进度（秒 + 已生成字数）：纯粹为了让人判断「在慢慢吐字」还是「卡住了」
+        const [genProgress, setGenProgress] = React.useState(null)
+        // host 确认的「此刻确实在跑」：busy 是本地状态，点了停止之后它仍为 'generate'，
+        // 但那时已经不该再转圈了，所以存活指示单独用一个状态
+        const [generatingNow, setGeneratingNow] = React.useState(false)
+        const genStartRef = React.useRef(0)
+
+        // 请求终止某一次生成，带退避重试。
+        // 为什么要重试：Client 点「停止」可能发生在 Host 把任务放进 genTasks **之前**
+        // （generate RPC 还在路上）。此时 generateCancel 会查无此任务——而「查无任务」在
+        // 生成尚未返回时是**暂时**的，过一会儿就能命中。不重试就会出现「点了停止、按钮正常、
+        // 实际没停」这种最糟的表现。
+        // keepAlive：普通重试期间要求 genIdRef 仍指向这次生成（防止把后来的生成误停）；
+        // 卸载清理路径传入固定常量即可——它只想把「那一次」停掉，且卸载后不可能有新生成。
+        // onLate 只在「重试耗尽且这次生成还是当前生成」时调用：说明是已完成/已过期。
+        const cancelGen = (genId, onLate, keepAlive) => {
+          const isAlive = () => genIdRef.current === genId
+          const alive = keepAlive || isAlive
+          let tries = 0
+          let stopped = false
+          const attempt = () => {
+            if (stopped || !alive()) return
+            callRpc('generateCancel', { genId }).then((r) => {
+              if (stopped || !alive()) return
+              if (r && r.ok && r.cancelled) return                      // 已受理，收尾交给轮询循环
+              if (++tries > 10) { if (onLate) onLate(); return }         // 约 1.2s 仍未命中：已完成/已过期
+              timer.timeout(attempt, 120)
+            }).catch(() => { stopped = true })                           // 通道不可达：放弃，轮询循环会兜底
+          }
+          attempt()
+        }
+
+        React.useEffect(() => () => {
+          genAliveRef.current = false
+          // 面板关闭/重挂载时把 host 侧还在跑的生成一起终止：否则面板没了、LLM 还在烧 token，
+          // 只能等 60s 后任务被回收。卸载后不能再 setState / pushToast，所以只发 RPC、不提示。
+          const id = genIdRef.current
+          genIdRef.current = null
+          if (id) cancelGen(id, null, () => true)
+        }, [])
         const canCommit = message.trim() !== '' && stagedPaths.length > 0 && busy === null && !conflictedCount
         const lineCount = Math.min(6, Math.max(2, (message.match(/\n/g) || []).length + 1))
 
         const doGenerate = async () => {
           if (busy) return
           setBusy('generate')
+          setCancelling(false)
+          genStartRef.current = Date.now()
+          setGenProgress(fmt(tr('genProgress'), { s: 0, n: 0 }))
+          // 从点下去就亮存活指示：读 diff 的准备阶段虽然没有流式输出，但确实在干活，
+          // 而且这正是「点了没反应」最容易让人怀疑卡死的阶段
+          setGeneratingNow(true)
+          // 乐观 genId：Host 的 prepareGenerate（逐文件 git diff，多文件仓库要数秒）发生在
+          // generate RPC 返回之前。若等 RPC 回来才拿 genId，这段时间点「停止」会落在空处。
+          // 所以先本地生成一个 id，经 clientGenId 交给 Host 用作任务 id（Host 侧有格式校验，
+          // 不合规会自己另生成，那时的提前取消会退化成「停止中…直到有结果」而不是误中断）。
+          genIdRef.current = 'gen-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
           try {
             // 生成前先刷新仓库状态：生成基于 staged diff，必须用最新的 staged 文件列表
             //（外部改动/自动刷新延迟可能让面板列表过期，导致漏掉刚暂存或带上已取消暂存的文件）。
@@ -2042,9 +2120,17 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
               }
             } catch (e) { /* 刷新失败时退用面板现有列表 */ }
             if (paths.length === 0) { pushToast('error', tr('stageFirst')); return }
-            const r = await callRpc('generate', { repoId: repo.id, files: paths })
-            if (!(r && r.ok)) { pushToast('error', (r && r.error) || tr('genFailedKeep')); return }
+            const r = await callRpc('generate', { repoId: repo.id, files: paths, clientGenId: genIdRef.current })
+            if (!(r && r.ok)) {
+              // Host 在准备 diff 阶段被终止：错误串里带 gen-stopped 标记。这时**不能**弹生成失败
+              // —— doCancelGenerate 已经/即将弹出「已停止」，再弹一个红色错误就是自相矛盾。
+              if (!(r && typeof r.error === 'string' && r.error.indexOf('gen-stopped') >= 0)) {
+                pushToast('error', (r && r.error) || tr('genFailedKeep'))
+              }
+              return
+            }
             const genId = r.genId
+            genIdRef.current = genId
             let fails = 0
             // 整体超时兜底：Host 端 LLM 挂起时 generatePoll 会永远返回未完成，
             // 无超时则 busy 永久卡死（180s 覆盖慢模型的正常生成）
@@ -2052,7 +2138,12 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
             while (true) {
               // 组件已卸载（面板关闭/重挂载）：停止轮询（finally 的 setBusy 为卸载后 no-op）
               if (!genAliveRef.current) return
-              if (Date.now() > deadline) { pushToast('error', tr('genTimeout')); break }
+              if (Date.now() > deadline) {
+                pushToast('error', tr('genTimeout'))
+                // 超时也要真的把 Host 侧任务停掉，否则 180s 后照样继续烧 token
+                cancelGen(genId)
+                break
+              }
               // 统一走 timer 服务（动态包沙箱禁用原生 setTimeout）
               await new Promise((res) => { timer.timeout(res, 120) })
               const p = await callRpc('generatePoll', { genId }).catch(() => null)
@@ -2061,6 +2152,12 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
                 continue
               }
               setMessage(p.text || '')
+              setGenProgress(fmt(tr('genProgress'), { s: Math.round((Date.now() - genStartRef.current) / 1000), n: (p.text || '').length }))
+              // 已经收尾（含被终止）就别再转圈了：存活指示只在 host 说「还没完」时为真
+              if (p.aborted || p.done || p.error) setGeneratingNow(false)
+              // aborted 是 host 确认过的终态：用户主动点击造成的中断走这条，绝不出红色报错。
+              // 放在 p.error 之前判断——主动终止的任务 error 恒为空，顺序反了会走进失败分支。
+              if (p.aborted) { pushToast('success', tr('genStopped')); break }
               if (p.error) { pushToast('error', p.error); break }
               if (p.done) {
                 pushToast('success', fmt(tr('generated'), { s: p.ruleSource === 'repo' ? tr('ruleRepo') : p.ruleSource === 'global' ? tr('ruleGlobal') : tr('ruleBuiltin') }))
@@ -2068,7 +2165,25 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
               }
             }
           } catch (e) { pushToast('error', fmt(tr('genFailed'), { e: e && e.message ? e.message : String(e) })) }
-          finally { setBusy(null) }
+          finally {
+            genIdRef.current = null
+            setCancelling(false)
+            setGenProgress(null)
+            setGeneratingNow(false)
+            setBusy(null)
+          }
+        }
+
+        // 终止生成：立刻把按钮切到「停止中…」（不等 RPC 返回——abort 要等 adapter 的
+        // fetch 真正中断，可能几百毫秒到几秒，没有即时反馈用户会反复点击）。
+        // 真正结束由轮询循环看到 aborted/done 后统一收尾。重试逻辑见上方 cancelGen。
+        const doCancelGenerate = () => {
+          const id = genIdRef.current
+          if (!id || cancelling) return
+          setCancelling(true)
+          // 点了停止就撤掉「正在跑」的动效：转圈还在转、点的是停止，观感自相矛盾
+          setGeneratingNow(false)
+          cancelGen(id, () => pushToast('success', tr('genStopTooLate')))
         }
 
         const doCommit = async (pushAfter) => {
@@ -2101,17 +2216,30 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
           genModel ? React.createElement('div', { className: 'gp-menu-note' }, fmt(tr('genModelCurrent'), { m: genModel })) : null
         ) : null
 
-        return React.createElement('div', { className: 'gp-commit-area' },
+        return React.createElement('div', { className: 'gp-commit-area' + (busy === 'generate' ? ' gp-generating' : '') },
           React.createElement('textarea', { className: 'gp-textarea', rows: lineCount, value: message, placeholder: tr('msgPlaceholder'), onChange: (e) => setMessage(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doCommit(false) } } }),
           React.createElement('div', { className: 'gp-commit-row' },
             React.createElement('div', { className: 'gp-left-group' },
-              React.createElement('button', { className: 'gp-btn', onClick: doGenerate, disabled: busy !== null || stagedPaths.length === 0, title: genModel ? fmt(tr('genTitleWithModel'), { m: genModel }) : tr('genTitle') },
-                busy === 'generate' ? React.createElement('span', { className: 'gp-spinner' }) : icon('sparkles'),
-                busy === 'generate' ? tr('generating') : tr('generate')),
+              // 生成中把「生成」原位换成「停止」：只保留一个按钮，既不出现两个灰按钮互相干扰，
+              // 也不会让右侧提示左右抖动（.gp-stop-btn 有 min-width，两个状态等宽）。
+              busy === 'generate'
+                ? React.createElement('button', { className: 'gp-btn gp-stop-btn', onClick: doCancelGenerate, disabled: cancelling, title: tr('genStopTitle') },
+                  cancelling ? React.createElement('span', { className: 'gp-spinner' }) : icon('stop'),
+                  cancelling ? tr('genStopping') : tr('genStop'))
+                : React.createElement('button', { className: 'gp-btn', onClick: doGenerate, disabled: busy !== null || stagedPaths.length === 0, title: genModel ? fmt(tr('genTitleWithModel'), { m: genModel }) : tr('genTitle') },
+                  icon('sparkles'), tr('generate')),
               React.createElement('div', { className: 'gp-menu-wrap' },
                 React.createElement('button', { className: 'gp-btn', onClick: () => { setRulesMenuOpen((o) => !o); if (!rulesMenuOpen) loadRulesInfo() } }, icon('gear'), tr('rules') + ' ', icon('chevronDown', 11)),
                 rulesMenu)),
-            React.createElement('span', { className: 'gp-staged-hint' }, stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : tr('noStaged'))),
+            React.createElement('span', { className: 'gp-staged-hint' },
+              // 存活指示：停止按钮本身是静止的，这里用「转圈 + 生成中 12s」补回「正在跑」的感觉。
+              // 曾经这一格就是「⟳ 生成中…」按钮，换成停止按钮后动效丢了，必须显式补上。
+              // generatingNow 只在 host 确认 done===false 时为真：点了停止之后指示器立刻消失，
+              // 不会出现「已经不跑了还在转」。提交区顶边另有一条扫光，见 .gp-commit-area.gp-generating。
+              generatingNow
+                ? React.createElement('span', { className: 'gp-gen-progress' }, React.createElement('span', { className: 'gp-spinner' }), genProgress, ' · ')
+                : null,
+              stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : tr('noStaged'))),
           React.createElement('div', { className: 'gp-commit-actions' },
             React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: () => doCommit(false), disabled: !canCommit, title: conflictedCount > 0 ? fmt(tr('titleResolveFirst'), { n: conflictedCount }) : otherOp ? fmt(tr('titleOtherOp'), { op: otherOp }) : stagedPaths.length === 0 ? tr('titleStageFirst') : fmt(tr('commitTitle'), { n: stagedPaths.length }) },
               busy === 'commit' ? React.createElement('span', { className: 'gp-spinner' }) : icon('check'),

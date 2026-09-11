@@ -198,6 +198,9 @@ export default function () {
           errNoLlm: '未找到可用的 LLM provider/model', errEmptyGen: '模型未产出内容', errGenAborted: '生成被终止: {m}',
           errGenTruncated: '生成被截断（token 额度不足），请重试',
           errGenMissing: '生成任务不存在或已过期，请重试',
+          // 准备（读 staged diff）阶段被用户终止。前面加固定标记 gen-stopped：
+          // Client 靠它把「主动终止」与「真失败」分开，绝不能弹成生成失败。
+          errGenStopped: '[gen-stopped] 已终止生成',
           errGenModelInvalid: '模型配置无效（缺少 provider 或 model）', errNoRulesHome: '无法定位规则/配置目录',
           errTimeout: '进程执行超时（{ms}ms）: {c}', noCommits: '无提交', errGenerateNoFiles: '请先暂存文件（生成基于 staged diff）',
           errBinary: '无法读取文件内容（可能为二进制）', conflictNoContent: '冲突文件在工作区不存在（删除类冲突或二进制文件）',
@@ -250,6 +253,8 @@ export default function () {
           errNoLlm: 'No LLM provider/model available', errEmptyGen: 'Model produced no output', errGenAborted: 'Generation aborted: {m}',
           errGenTruncated: 'Generation truncated (token budget exhausted), please retry',
           errGenMissing: 'Generation task not found or expired, please retry',
+          // Marker prefix gen-stopped: lets the client tell a user abort apart from a real failure.
+          errGenStopped: '[gen-stopped] generation stopped',
           errGenModelInvalid: 'Invalid model configuration (missing provider or model)', errNoRulesHome: 'Cannot locate rules/config directory',
           errTimeout: 'Process execution timed out ({ms}ms): {c}', noCommits: 'no commits', errGenerateNoFiles: 'Stage files first (generation is based on the staged diff)',
           errBinary: 'Cannot read file content (may be binary)', conflictNoContent: 'Conflict file is absent from the worktree (delete/delete conflict or binary file)',
@@ -1262,9 +1267,13 @@ export default function () {
 
       // 生成任务表：generate 立即返回 genId，后台任务累积 chunk，Client 经 generatePoll
       // 增量取回实现流式显示（connection RPC 是请求-响应通道，无法服务端推送）。
+      // 每个任务带自己的 AbortController：generateCancel 直接 abort 底层 llm.stream，
+      // 不依赖「下次轮询时才发现要停」——abort 后 adapter 的 fetch 立刻中断，不再烧 token。
       const genTasks = new Map()
 
-      async function prepareGenerate(repo, files) {
+      // task 由调用方（generate RPC）在**准备 diff 之前**就建好并放进 genTasks，
+      // 这样「读 diff 的那几百毫秒~数秒」也处在可终止状态（多文件仓库尤其明显）。
+      async function prepareGenerate(task, repo, files) {
         const rules = await loadEffectiveRules(repo)
         const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
         if (!chk.ok) return chk
@@ -1279,6 +1288,8 @@ export default function () {
         let total = 0
         let truncatedAny = false
         for (const f of files) {
+          // 逐文件检查终止标志：git diff 是串行的，不检查则 N 个文件都要跑完才停得下来
+          if (task.aborted) return fail(tr('errGenStopped'))
           if (total >= DIFF_TOTAL_BUDGET) { truncatedAny = true; break }
           let text
           if (untrackedSet.has(f)) text = '# 新文件（未跟踪）: ' + f
@@ -1303,6 +1314,8 @@ export default function () {
         if (truncatedAny) parts.push('# ……（diff 过长，部分内容已截断）')
         const sel = await modelSelection()
         if (!sel) return fail(tr('errNoLlm'))
+        // modelSelection 里有 listModels 的网络调用，回来后再确认一次用户没在这期间点了停止
+        if (task.aborted) return fail(tr('errGenStopped'))
         const userCtx = (rules.user_context || '')
           .replaceAll('{repo_name}', repo.name)
           .replaceAll('{branch}', status.branch || '(未知)')
@@ -1314,10 +1327,14 @@ export default function () {
       async function runGenerate(genId, prep) {
         const task = genTasks.get(genId)
         if (!task) return
+        // 一个任务一个 controller：Client 的 generateCancel → ac.abort() → llm.stream 的
+        // signal 触发 adapter 中断，finish chunk 以 reason.kind='aborted' 收尾。
+        const ac = new AbortController()
+        task.ac = ac
         const consume = async (opts, onDelta) => {
           let t = ''
           let truncated = false
-          const st = llm.stream(opts)
+          const st = llm.stream(Object.assign({ signal: ac.signal }, opts))
           for await (const chunk of st) {
             if (chunk.type === 'text-delta') { t += chunk.text; if (onDelta) onDelta(t) }
             else if (chunk.type === 'finish') {
@@ -1330,6 +1347,14 @@ export default function () {
             }
           }
           return { retry: false, text: t, truncated }
+        }
+        // 用户主动终止：与「出错」走完全不同的话术。已产出的部分保留在 task.text 里
+        // （onDelta 一直在回填），Client 那边输入框不会被清空，用户可据此接着改。
+        const settleAborted = () => {
+          task.text = finalCleanFence(task.text || '')
+          task.done = true
+          task.error = ''
+          task.aborted = true
         }
         try {
           const base = {
@@ -1349,12 +1374,15 @@ export default function () {
             // chunk 结束（如 UNSUPPORTED_REASONING_EFFORT），此时回退为不传强度重试，
             // 其余错误原样上报。
             res = await consume(Object.assign({}, base, { reasoningEffort: prep.sel.reasoningEffort }), onDelta)
+            // 用户已点停止：绝不能再发第二次请求（那会重新开始烧 token）
+            if (task.aborted) { settleAborted(); return }
             if (res.retry && /reasoning\s*effort|UNSUPPORTED_REASONING_EFFORT/i.test(res.message || '')) {
               res = await consume(base, onDelta)
             }
           } else {
             res = await consume(base, onDelta)
           }
+          if (task.aborted) { settleAborted(); return }
           if (res.retry) throw new Error(res.message)
           if (res.truncated && !res.text) { task.error = tr('errGenTruncated'); task.done = true; return }
           const message = finalCleanFence(res.text || '')
@@ -1362,9 +1390,15 @@ export default function () {
           task.text = message
           task.done = true
         } catch (e) {
-          task.error = e && e.message ? e.message : String(e)
-          task.done = true
+          // abort 落在 await 之间时会以异常形式冒出来（各家 adapter 的取消错误形态不一），
+          // 只要 task.aborted 已置位就统一按「用户终止」处理，绝不显示成生成失败。
+          if (task.aborted) settleAborted()
+          else {
+            task.error = e && e.message ? e.message : String(e)
+            task.done = true
+          }
         } finally {
+          task.ac = null
           if (timer) timer.timeout(() => genTasks.delete(genId), 60000)
         }
       }
@@ -1931,13 +1965,32 @@ export default function () {
       }))
 
       // ---- AI 生成提交信息 ----
+      // 任务 id：优先沿用 Client 传的 clientGenId，让「Client 先乐观生成 id、准备 diff 期间
+      // 就能发 generateCancel」这条路径指向同一个任务（否则两边 id 不同，提前点停止会落空）。
+      // 但绝不能信外部输入：只接受 gen- 前缀 + 字母数字连字符、长度受限的形态，否则自己生成。
+      function genIdFrom(value) {
+        const s = typeof value === 'string' ? value : ''
+        return /^gen-[A-Za-z0-9-]{1,48}$/.test(s) ? s : 'gen-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+      }
+
       registerRpc('generate', withRepo(async (repo, args) => {
         if (!args || !Array.isArray(args.files) || args.files.length === 0) return fail(tr('errGenerateNoFiles'))
         await audit({ op: 'generate', repo: repo.path, files: args.files.length })
-        const prep = await prepareGenerate(repo, args.files.map(String))
-        if (!prep.ok) return prep
-        const genId = 'gen-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
-        genTasks.set(genId, { genId, text: '', done: false, error: '', ruleSource: prep.rules.source, provider: prep.sel.provider, model: prep.sel.model })
+        // 任务先落地再读 diff：prepareGenerate 期间用户就能终止（它逐文件检查 task.aborted）。
+        // Client 拿到 genId 之前会**乐观地**用自己的 genId 调 generateCancel —— 见 client.js
+        // 的 doGenerate / genIdRef 注释，两侧必须同时改，否则「提前点停止」会落在空处。
+        const genId = genIdFrom(args.clientGenId)
+        const task = { genId, text: '', done: false, error: '', aborted: false, ac: null, ruleSource: '', provider: '', model: '' }
+        genTasks.set(genId, task)
+        const prep = await prepareGenerate(task, repo, args.files.map(String))
+        if (!prep.ok) {
+          // 准备阶段终止/失败：任务不再需要，直接摘掉（此时 runGenerate 还没启动）
+          genTasks.delete(genId)
+          return prep
+        }
+        task.ruleSource = prep.rules.source
+        task.provider = prep.sel.provider
+        task.model = prep.sel.model
         runGenerate(genId, prep)
         return ok({ genId })
       }))
@@ -1946,9 +1999,41 @@ export default function () {
         const genId = args && args.genId ? String(args.genId) : ''
         const task = genTasks.get(genId)
         if (!task) return fail(tr('errGenMissing'))
-        const out = ok({ text: liveCleanFence(task.text), done: task.done, error: task.error, ruleSource: task.ruleSource, provider: task.provider, model: task.model })
+        const out = ok({ text: liveCleanFence(task.text), done: task.done, error: task.error, aborted: !!task.aborted, ruleSource: task.ruleSource, provider: task.provider, model: task.model })
         if (task.done) genTasks.delete(genId)
         return out
+      })
+
+      // 终止生成：RPC 是请求-响应通道，Client 无法直接把 AbortSignal 递进来，
+      // 所以由 Client 显式调用本方法，Host 侧 abort 对应任务的 controller。
+      // 不用 withRepo：终止动作只认 genId，仓库被移除/切换后仍应能停掉在跑的任务。
+      // 幂等且「晚了也不算错」：任务已完成（map 里已删）时返回 cancelled:false，
+      // Client 据此提示「已完成，未中断」而不是报错。
+      registerRpc('generateCancel', async (args) => {
+        const genId = args && args.genId ? String(args.genId) : ''
+        const task = genTasks.get(genId)
+        if (!task) return ok({ cancelled: false })
+        // 已经收尾（成功/失败/已终止）的任务：如实回答「没中止到」。
+        // Client 据此提示「生成已完成，未中断」；顺带在这里回收，避免它挂到 60s 定时器才消失。
+        if (task.done) { genTasks.delete(genId); return ok({ cancelled: false }) }
+        // 先置标志再 abort：abort 可能同步 settled，顺序反了会把主动终止误判成失败。
+        task.aborted = true
+        const ac = task.ac
+        task.ac = null
+        if (ac) { try { ac.abort() } catch (e) { /* adapter 已收尾时 abort 无害 */ } }
+        // 立即把已产出内容落成终态：Client 以 aborted 为终态判据，读到的必须是收尾后的文本
+        // （runGenerate 稍后还会写一次同样的值，重复写入无害——文本只增不减）。
+        task.text = finalCleanFence(task.text || '')
+        task.done = true
+        task.error = ''
+        // **不在这里 delete**：删除由读到 aborted 的那次 generatePoll 负责（与正常完成同一条
+        // 回收路径）。这里删掉会让「准备 diff 期间终止」变成静默 —— generate 的 prep 失败分支
+        // 也要 delete，两处都删才能覆盖全部路径，而多删一次无害。
+        // 审计**不 await**：audit 是串行链（auditChain.then(...)），排在它前面的可能是
+        // generate 那条「120KB diff 预算」的重活，await 会把「点停止→真正中断」拖后。
+        // 终止路径要的是立刻返回，审计照常排队落盘。
+        audit({ op: 'generate-cancel', genId })
+        return ok({ cancelled: true })
       })
 
       registerRpc('genModelGet', async () => {
