@@ -4,7 +4,8 @@
 
 构建产物 `lib/` 由 `scripts/build.mjs` 从 `src/` 生成：
 `lib/index.js`（Host 半体，声明 `inject: ['fs','subprocess','connection','webServer']`）与
-`lib/client.js`（浏览器 ModuleLoader bundle，声明 `inject: ['slots','connection']`）。
+`lib/client.js`（浏览器 ModuleLoader bundle，声明 `inject: ['slots','connection','workspaces']`；
+Client 源码为 `src/client/` 多模块，经 esbuild 打包成单文件，react 由宿主模块表提供）。
 Host↔Client 经 `/git-panel` HTTP RPC 通道通信：Host 半体直接占用 `webServer` 的
 `/git-panel` 前缀路由（见 `src/host.js` 的 `registerHttpChannel`），浏览器信任围栏与会话
 cookie 校验复用 `connection.requestRejection`，Client 侧仍走
@@ -12,6 +13,15 @@ cookie 校验复用 `connection.requestRejection`，Client 侧仍走
 
 包声明了 `dsh.bundle.patch`（组合包），因此同时支持官方 `dsh plugin` 机制与
 无 pnpm 环境的复制式安装，按你的环境任选其一。
+
+> **构建后要不要重跑安装？取决于落点是链接还是副本**（2026-09-12 审查踩到的坑）：
+> - `dsh plugin --profile web add .` 会把依赖登记为 `link:<仓库路径>`，落点是**链接**，
+>   直接指向本仓库 → `npm run build` 之后浏览器刷新即生效，**不需要**再跑安装脚本；
+> - 复制式安装（`install.sh` / 手动 robocopy）的落点是**实体副本** → 每次 `npm run build`
+>   之后都必须重跑一次安装脚本，否则 DSH 一直在跑那份旧副本（症状：改了代码"没反应"）。
+>
+> `scripts/install.mjs` 会自己判定这两种情形并如实报告；若检测到「声明是 `link:`、落点却是
+> 实体副本」这种自相矛盾的状态，它会**打印修法后拒绝复制**，不再默默掩盖问题。
 
 ## 方式一：`dsh plugin`（官方机制，推荐；需要 pnpm 在 PATH）
 

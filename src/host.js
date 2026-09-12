@@ -14,8 +14,8 @@
  *   - 动态 Cordis 包：本文件 `export default function () {` 与结尾 `}` 之间的
  *     函数体即 cordis_define 的 code.host（无 config，扫描上限用默认值）；
  *   - 文件形态（npm 包）：默认导出 Cordis 插件，apply(ctx, config) 的第二参接收
- *     组合行 config（cordis.yml），其中 scanMaxDepth / scanMaxDirs / scanMaxRepos
- *     覆盖扫描上限；Client 半体见 ./client.js（dsh.client 约定）。
+ *     组合行 config（cordis.patch.yml 的 insert 行 / dsh plugin 的注册行），其中的
+ *     scanMaxDepth / scanMaxDirs / scanMaxRepos 覆盖扫描上限；Client 半体见 src/client/（dsh.client 约定）。
  *
  * 分节索引（apply 内按序）：
  *   Host 服务与扫描配置 → 内置默认规则常量 → 协议与路径工具 → 国际化 →
@@ -51,7 +51,7 @@ export default function () {
       // 点前缀目录（.git/.svn/.idea/.venv 等）统一由扫描处的 startsWith('.') 规则跳过，这里只列常规重目录
       const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'target', 'coverage', 'vendor', 'venv', '__pycache__', 'bin', 'obj'])
 
-      // 扫描上限：文件形态下由组合行 config（cordis.yml）覆盖；动态包形态无 config，用默认值
+      // 扫描上限：文件形态下由组合行 config（cordis.patch.yml 的 insert 行 / dsh plugin 的注册行）覆盖；动态包形态无 config，用默认值
       function scanLimit(value, fallback, min, max) {
         const n = Math.floor(Number(value))
         if (!isFinite(n) || n <= 0) return fallback
@@ -152,7 +152,18 @@ export default function () {
           for (const k of Object.keys(r)) if (k !== 'ok') value[k] = r[k]
           return { ok: true, value }
         }
-        return { ok: false, error: { code: 'bad-request', message: String((r && r.error) || 'error'), details: { issues: [] } } }
+        // 失败信封里也要能带业务文本（push 失败时 opPush 塞进来的 git 原文，见 opPush 的
+        // out.detail）。dsh-client-connection 的 rpcErrorSchema.details 是
+        // record(string, unknown)——两端都按此形状**原样保留**（实测 lib/client.js 的
+        // 服务端响应解析器逐字构造 { code, message, details: error.details }）。
+        // ⚠ details.issues 是协议自身的校验错误位，保留；detail/reason/command 才是我们的业务字段。
+        const details = { issues: [] }
+        if (r && typeof r.detail === 'string' && r.detail) details.detail = r.detail
+        // reason/command：无上游失败的结构化判据与 Host 定稿的建议命令（见 opPush），
+        // 让 Client 不必去匹配文案、也不必自己拼 remote。
+        if (r && typeof r.reason === 'string' && r.reason) details.reason = r.reason
+        if (r && typeof r.command === 'string' && r.command) details.command = r.command
+        return { ok: false, error: { code: 'bad-request', message: String((r && r.error) || 'error'), details } }
       }
 
       // 路径拼接：按 base 自身形态选分隔符——POSIX 上反斜杠只是普通文件名字符，
@@ -179,7 +190,7 @@ export default function () {
           errNoFilesDiscard: '缺少要放弃的文件', errDiscard: '放弃更改失败: {e}', discardedN: '已放弃 {n} 个文件的更改',
           errNothingStaged: '没有已暂存的文件，请先点击文件右侧的 + 暂存',
           errCommit: 'git commit 失败: {e}', errNoMessage: '提交信息不能为空',
-          errPush: 'push 失败（提交已保留）: {e}', errFetch: 'fetch 失败: {e}', errMerge: 'merge 失败（fetch 已完成）: {e}',
+          errPush: 'push 失败（提交已保留）: {e}', errPushNoUpstream: '[push-no-upstream] 当前分支没有上游分支（upstream），直接推送不会成功：先在终端执行一次 git push -u {r} {b} 建立跟踪，之后再回到面板推送。', errFetch: 'fetch 失败: {e}', errMerge: 'merge 失败（fetch 已完成）: {e}',
           errMergeConflict: '合并冲突：{n} 个文件未解决。解决后点该文件行的 ＋ 标记为已解决，或用「中止合并」放弃本次合并',
           errMergePending: '已有未完成的合并（MERGE_HEAD 存在）：请先解决冲突并提交，或使用「中止合并」放弃本次合并',
           errNoMergeInProgress: '当前没有进行中的合并，无需中止',
@@ -191,7 +202,7 @@ export default function () {
           errCommitConflict: '还有 {n} 个文件未解决：解决后点该文件行的 ＋ 标记为已解决，再提交',
           errBadBranch: '非法分支名', errSwitch: '切换分支失败: {e}',
           errStash: 'stash 失败: {e}', errStashPop: 'stash pop 失败: {e}',
-          errReset: 'reset 失败: {e}', errClean: 'clean 失败: {e}',
+          errReset: 'reset 失败: {e}', errResetMoved: 'HEAD 已不在该提交上（当前 {cur}，期望 {want}），已取消撤销以免动到别的提交', errResetNoParent: '没有上一个提交可以回退（这是仓库的第一个提交）', errClean: 'clean 失败: {e}',
           errDiff: 'diff 失败: {e}', noDiff: '（无差异）', fullTruncated: '……（文件过大，全文视图已截断）',
           errBadPath: '非法路径', imgNotImage: '不是可预览的图片',
           errStatus: '读取状态失败: {e}',
@@ -209,7 +220,7 @@ export default function () {
           rulesSaved: '规则已保存到 {p}', rulesReset: '已重置为默认规则',
           rulesResetRepo: '已删除仓库专属规则，回退到全局规则',
           rulesScopeGlobal: '已切换为使用全局规则', rulesScopeRepo: '已切换为使用仓库专属规则',
-          copied: '已复制到剪贴板', errCopy: '复制失败: {e}',
+          copied: '已复制到剪贴板', errCopy: '复制失败: {e}', errCopyEmpty: '没有可复制的内容', errCopyTooLong: '内容过长，无法复制',
           errBranches: '读取分支失败: {e}', errNoBranchName: '缺少分支名',
           errStashList: '读取 stash 失败: {e}', errBadHash: '非法 hash', errBadRef: '非法 stash 引用',
           errCommitDetail: '读取提交失败: {e}', errLog: '读取历史失败: {e}', errCommitFiles: '读取提交文件失败: {e}',
@@ -234,7 +245,7 @@ export default function () {
           errNoFilesDiscard: 'No files to discard', errDiscard: 'Discard failed: {e}', discardedN: 'Discarded {n} file(s)',
           errNothingStaged: 'No staged files; stage files first with the + on the right',
           errCommit: 'git commit failed: {e}', errNoMessage: 'Commit message cannot be empty',
-          errPush: 'push failed (commits kept): {e}', errFetch: 'fetch failed: {e}', errMerge: 'merge failed (fetch already done): {e}',
+          errPush: 'push failed (commits kept): {e}', errPushNoUpstream: '[push-no-upstream] The current branch has no upstream, so a plain push cannot succeed: run git push -u {r} {b} once in a terminal to set it up, then push from the panel again.', errFetch: 'fetch failed: {e}', errMerge: 'merge failed (fetch already done): {e}',
           errMergeConflict: 'Merge conflict: {n} unresolved file(s). Resolve them and press + on the row to mark as resolved, or use "Abort Merge" to discard this merge',
           errMergePending: 'A merge is already in progress (MERGE_HEAD exists): resolve and commit it first, or use "Abort Merge"',
           errNoMergeInProgress: 'No merge in progress to abort',
@@ -246,7 +257,7 @@ export default function () {
           errCommitConflict: '{n} file(s) are still unresolved: resolve them and press + on the row before committing',
           errBadBranch: 'Invalid branch name', errSwitch: 'Failed to switch branch: {e}',
           errStash: 'stash failed: {e}', errStashPop: 'stash pop failed: {e}',
-          errReset: 'reset failed: {e}', errClean: 'clean failed: {e}',
+          errReset: 'reset failed: {e}', errResetMoved: 'HEAD is no longer at that commit (now {cur}, expected {want}); the undo was cancelled so a different commit is not touched', errResetNoParent: 'There is no previous commit to go back to (this is the repository\u2019s first commit)', errClean: 'clean failed: {e}',
           errDiff: 'diff failed: {e}', noDiff: '(no differences)', fullTruncated: '...(file too large, full view truncated)',
           errBadPath: 'Invalid path', imgNotImage: 'Not a previewable image',
           errStatus: 'Failed to read status: {e}',
@@ -263,7 +274,7 @@ export default function () {
           rulesSaved: 'Rules saved to {p}', rulesReset: 'Reset to default rules',
           rulesResetRepo: 'Repo-specific rules removed; falling back to global rules',
           rulesScopeGlobal: 'Switched to global rules', rulesScopeRepo: 'Switched to repo-specific rules',
-          copied: 'Copied to clipboard', errCopy: 'Copy failed: {e}',
+          copied: 'Copied to clipboard', errCopy: 'Copy failed: {e}', errCopyEmpty: 'Nothing to copy', errCopyTooLong: 'Content too long to copy',
           errBranches: 'Failed to read branches: {e}', errNoBranchName: 'Missing branch name',
           errStashList: 'Failed to read stash: {e}', errBadHash: 'Invalid hash', errBadRef: 'Invalid stash ref',
           errCommitDetail: 'Failed to read commit: {e}', errLog: 'Failed to read history: {e}', errCommitFiles: 'Failed to read commit files: {e}',
@@ -994,7 +1005,10 @@ export default function () {
           otherOp = rbR.code === 0 ? 'rebase' : cpR.code === 0 ? 'cherry-pick' : rvR.code === 0 ? 'revert' : null
         }
         const mergeMessage = mergeHeadR.code === 0 ? await mergeMessageOf(repo) : null
-        return ok({ branch, upstream, aheadBehind, staged, unstaged, untracked, conflicted, mergeInProgress: mergeHeadR.code === 0, otherOp, mergeMessage, statusError: statusR.code === 0 ? null : (statusR.errText || statusR.text).slice(0, 200) })
+        // headShort：提交前的 HEAD 短 hash 本来就为 detached 文案取过（headR），顺手回传。
+        // 「提交成功但推送失败」的弹窗要用它说明「撤回后又回到了哪个提交」，让用户有得核对。
+        const headShort = headR.code === 0 ? (headR.text || '').trim() : null
+        return ok({ branch, headShort, upstream, aheadBehind, staged, unstaged, untracked, conflicted, mergeInProgress: mergeHeadR.code === 0, otherOp, mergeMessage, statusError: statusR.code === 0 ? null : (statusR.errText || statusR.text).slice(0, 200) })
       }
 
       // 合并提交信息：git 收尾合并用的是 .git/MERGE_MSG（`git commit --no-edit` 的来源），
@@ -1334,7 +1348,8 @@ export default function () {
         const consume = async (opts, onDelta) => {
           let t = ''
           let truncated = false
-          const st = llm.stream(Object.assign({ signal: ac.signal }, opts))
+          // signal 放最后：opts 将来若自带 signal，也绝不能覆盖掉中止通道
+          const st = llm.stream(Object.assign({}, opts, { signal: ac.signal }))
           for await (const chunk of st) {
             if (chunk.type === 'text-delta') { t += chunk.text; if (onDelta) onDelta(t) }
             else if (chunk.type === 'finish') {
@@ -1357,6 +1372,7 @@ export default function () {
           task.aborted = true
         }
         try {
+          if (task.aborted) { settleAborted(); return } // 在 generate 与 runGenerate 的交接缝里被终止
           const base = {
             provider: prep.sel.provider,
             model: prep.sel.model,
@@ -1398,6 +1414,8 @@ export default function () {
             task.done = true
           }
         } finally {
+          // 走到这里说明 stream 已收尾，controller 不必再对外暴露。
+          // （generateCancel 已提前摘走并 abort 过时，这里把 null 写回同一引用也无害）
           task.ac = null
           if (timer) timer.timeout(() => genTasks.delete(genId), 60000)
         }
@@ -1506,7 +1524,48 @@ export default function () {
 
       async function opPush(repo) {
         const r = await gitRun(repo.path, ['push'], { maxBytes: 256 * 1024, timeoutMs: 180000 })
-        if (r.code !== 0) return fail(fmt(tr('errPush'), { e: (r.errText || r.text).slice(0, 400) }))
+        if (r.code !== 0) {
+          // 失败后先分类：最没救的一种是「当前分支没有上游分支」——面板的推送有意不带 -u
+          //（建跟踪是用户的决定），这种状态下重试多少次都一样，而 git 原文还会随语言变化。
+          // ⚠ 只在**真的失败之后**才判上游：push.default=current 或 push.autoSetupRemote=true
+          // 的仓库里，无上游的裸 push 是能成功的，提前拦截会把这类用户误伤。
+          // 前缀标记 [push-no-upstream] 供 Client 识别。标记随 message 走（不是独立字段）：
+          // Client 必须在文案被剥离**之前**认出这条失败，见 src/client.js 的 recordPushFail。
+          // 与 errGenStopped 同一约定；两者都在 Client 侧剥掉，不进用户可见文案。
+          //
+          // ⚠ 判据必须同时确认「在分支上」：`rev-parse @{u}` 在**无上游**与**detached HEAD**
+          // 下同样是非零（实测均为 128），单看它会把分离头指针也归成「没有上游」。而那种状态下
+          // 不存在可填的 <branch>，面板给出的 `git push -u <remote> <branch>` 是条不可执行的
+          // 建议（git 此时给的是 `git push origin HEAD:<name>`）。故只对「在分支上」下结论。
+          const upR = await gitRun(repo.path, ['rev-parse', '-q', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { maxBytes: 4096, timeoutMs: 30000 })
+          const hasUpstream = upR.code === 0 && !/^fatal:/.test(upR.errText) // 与 opPull 同款判定
+          const headRefR = await gitRun(repo.path, ['symbolic-ref', '-q', 'HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
+          const headRef = headRefR.code === 0 ? (headRefR.text || '').trim() : ''
+          if (!hasUpstream && /^refs\/heads\/.+/.test(headRef)) {
+            const branch = headRef.slice('refs/heads/'.length)
+            // remote 用配置里的真名（新建分支尚未 push 时 branch.<b>.remote 还没写，回落 origin），
+            // 让建议是可以直接复制执行的那一条，而不是占位符
+            const remoteR = await gitRun(repo.path, ['config', '--get', 'branch.' + branch + '.remote'], { maxBytes: 4096, timeoutMs: 30000 })
+            const remote = remoteR.code === 0 ? (remoteR.text || '').trim() || 'origin' : 'origin'
+            // 建议命令由 Host 一次性定稿（remote 取自实测配置，见上），并用信封的 details
+            // 一并交给 Client：面板那边**不再自己拼** `git push -u origin <branch>`——那会在
+            // remote 不是 origin 的仓库里给出一条与正文（用 {r} 渲染出真 remote）互相矛盾的命令。
+            // reason 同理：让 Client 用结构化字段认出「这条失败是无上游」，而不是去匹配文案。
+            const out = fail(fmt(tr('errPushNoUpstream'), { r: remote, b: branch }))
+            out.reason = 'no-upstream'
+            out.command = 'git push -u ' + remote + ' ' + branch
+            return out
+          }
+          // 复制/展开「报错原文」要的是 git 自己的输出，而 message 是**给人看的那句话**。
+          // 两者都要：正文用面板话术（带「提交已保留」这类结论），原文另放进 detail 字段
+          //（toEnvelope 会把它搬进信封的 error.details.detail，Client 的 unwrapRpc 再摊平回
+          //  res.detail，见 src/client.js 的 pushFail.raw）。只在确实有输出时带，
+          // 免得界面多出一段空白的「报错原文」。
+          const detail = (r.errText || r.text || '').trim().slice(0, 4000)
+          const out = fail(fmt(tr('errPush'), { e: (r.errText || r.text).slice(0, 400) }))
+          if (detail) out.detail = detail
+          return out
+        }
         return ok({ summary: tr('pushed'), detail: (r.text || '').trim().slice(0, 300) })
       }
 
@@ -1569,7 +1628,25 @@ export default function () {
         return ok({ summary: tr('stashPopped'), detail: (r.text || '').trim().slice(0, 300) })
       }
 
-      async function opReset(repo, mode) {
+      async function opReset(repo, mode, expectHash) {
+        // 目标提交存在性前置校验：`HEAD~1` 在只有首个提交的仓库里必然 fatal，而面板的
+        // 入口是「取消上次提交」——那种仓库里推完失败再点它，用户等到的是一句原文报错。
+        // 这里提前给出可理解的结论（exit 128 / "unknown revision" 对用户不可操作）。
+        // ⚠ 只在 soft（撤销提交）路径跑：hard 走的是「更多操作 → Reset --hard」那条危险确认
+        // 弹窗，没有这条提前结论的语义；对它多付一次 rev-parse 没有收益，还会在 HEAD~1 恰好
+        // 不可解析时把真正的 git 失败原因换成一句不合场景的解释。
+        if (mode !== 'hard') {
+          const parentR = await gitRun(repo.path, ['rev-parse', '-q', '--verify', 'HEAD~1^{commit}'], { maxBytes: 4096, timeoutMs: 30000 })
+          if (parentR.code !== 0) return fail(tr('errResetNoParent'))
+        }
+        // expectHash：撤回「提交成功但推送失败」的那个提交时，Client 把当时的 HEAD 短 hash
+        // 一起传来。`reset` 只认相对引用 HEAD~1，而弹窗不阻塞面板操作——用户在这期间又提交
+        // 一次的话，相对引用撤掉的就是**新提交**。对不上就拒绝，比事后打印「当前 HEAD」有用。
+        if (expectHash) {
+          const nowR = await gitRun(repo.path, ['rev-parse', '--short', 'HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
+          const now = nowR.code === 0 ? (nowR.text || '').trim() : ''
+          if (now !== expectHash) return fail(fmt(tr('errResetMoved'), { cur: now || '(未知)', want: expectHash }))
+        }
         const r = await gitRun(repo.path, ['reset', mode === 'hard' ? '--hard' : '--soft', 'HEAD~1'], { maxBytes: 128 * 1024, timeoutMs: 60000 })
         if (r.code !== 0) return fail(fmt(tr('errReset'), { e: (r.errText || r.text).slice(0, 300) }))
         return ok({ summary: fmt(tr('resetDone'), { m: mode }), detail: (r.text || '').trim().slice(0, 300) })
@@ -2016,19 +2093,24 @@ export default function () {
         // 已经收尾（成功/失败/已终止）的任务：如实回答「没中止到」。
         // Client 据此提示「生成已完成，未中断」；顺带在这里回收，避免它挂到 60s 定时器才消失。
         if (task.done) { genTasks.delete(genId); return ok({ cancelled: false }) }
-        // 先置标志再 abort：abort 可能同步 settled，顺序反了会把主动终止误判成失败。
+        // 还没收尾：置标志 + abort。
+        // ⚠ 顺序：必须先置 task.aborted 再 abort()——abort 可能同步 settled，顺序反了会把主动终止误判成失败。
+        // ⚠ **这里不 delete**：任务可能尚未跑到 runGenerate 的赋值点（generate 的 prepareGenerate
+        // 期间，甚至刚 set 进表还没走到 await），删掉会让随后 assign 进 ac 的 abort 监听彻底失效、
+        // 生成照跑，而且此后 generatePoll 只会回「任务不存在」。回收统一交给客户端那次读到
+        // aborted 的 generatePoll（与正常完成同一条路径），没人来读则由 runGenerate finally 的
+        // 60s 定时器兜底。
         task.aborted = true
         const ac = task.ac
-        task.ac = null
-        if (ac) { try { ac.abort() } catch (e) { /* adapter 已收尾时 abort 无害 */ } }
+        if (ac) {
+          try { ac.abort() } catch (e) { /* adapter 已收尾时 abort 无害 */ }
+          task.ac = null
+        }
         // 立即把已产出内容落成终态：Client 以 aborted 为终态判据，读到的必须是收尾后的文本
         // （runGenerate 稍后还会写一次同样的值，重复写入无害——文本只增不减）。
         task.text = finalCleanFence(task.text || '')
         task.done = true
         task.error = ''
-        // **不在这里 delete**：删除由读到 aborted 的那次 generatePoll 负责（与正常完成同一条
-        // 回收路径）。这里删掉会让「准备 diff 期间终止」变成静默 —— generate 的 prep 失败分支
-        // 也要 delete，两处都删才能覆盖全部路径，而多删一次无害。
         // 审计**不 await**：audit 是串行链（auditChain.then(...)），排在它前面的可能是
         // generate 那条「120KB diff 预算」的重活，await 会把「点停止→真正中断」拖后。
         // 终止路径要的是立刻返回，审计照常排队落盘。
@@ -2140,21 +2222,38 @@ export default function () {
         })
       }))
 
+      // 平台分支（与 openInExplorer 同法）：Windows clip / macOS pbcopy / Linux xclip→xsel
+      async function clipWrite(text) {
+        if (process.platform === 'win32') {
+          await spawnRaw(['cmd.exe', '/d', '/s', '/c', 'clip'], '.', { stdinData: text, timeoutMs: 15000 })
+        } else if (process.platform === 'darwin') {
+          await spawnRaw(['pbcopy'], '.', { stdinData: text, timeoutMs: 15000 })
+        } else {
+          let copied = false
+          try { copied = (await spawnRaw(['xclip', '-selection', 'clipboard'], '.', { stdinData: text, timeoutMs: 15000 })).code === 0 } catch (e) { /* xclip 不在 PATH，试 xsel */ }
+          if (!copied) await spawnRaw(['xsel', '--clipboard', '--input'], '.', { stdinData: text, timeoutMs: 15000 })
+        }
+      }
+
       registerRpc('rulesCopy', async (args) => {
         const repo = resolveRulesRepo(args)
         const effective = await loadEffectiveRules(repo)
         const yaml = emitRulesYaml({ system_prompt: effective.system_prompt, user_context: effective.user_context })
         try {
-          // 平台分支（与 openInExplorer 同法）：Windows clip / macOS pbcopy / Linux xclip→xsel
-          if (process.platform === 'win32') {
-            await spawnRaw(['cmd.exe', '/d', '/s', '/c', 'clip'], '.', { stdinData: yaml, timeoutMs: 15000 })
-          } else if (process.platform === 'darwin') {
-            await spawnRaw(['pbcopy'], '.', { stdinData: yaml, timeoutMs: 15000 })
-          } else {
-            let copied = false
-            try { copied = (await spawnRaw(['xclip', '-selection', 'clipboard'], '.', { stdinData: yaml, timeoutMs: 15000 })).code === 0 } catch (e) { /* xclip 不在 PATH，试 xsel */ }
-            if (!copied) await spawnRaw(['xsel', '--clipboard', '--input'], '.', { stdinData: yaml, timeoutMs: 15000 })
-          }
+          await clipWrite(yaml)
+          return ok({ summary: tr('copied') })
+        } catch (e) { return fail(fmt(tr('errCopy'), { e: e && e.message ? e.message : String(e) })) }
+      })
+
+      // 通用剪贴板写入（面板「复制错误」等按钮用）。与 rulesCopy 共用同一个平台分支实现，
+      // 行为一致；不走 browser navigator.clipboard，避免依赖浏览器权限与安全上下文。
+      // 体积上限 256KB：只用来放错误原文/摘要，给个上限免得被当成任意文件传输通道。
+      registerRpc('clipSetText', async (args) => {
+        const text = args && args.text !== undefined && args.text !== null ? String(args.text) : ''
+        if (!text) return fail(tr('errCopyEmpty'))
+        if (text.length > 256 * 1024) return fail(tr('errCopyTooLong'))
+        try {
+          await clipWrite(text)
           return ok({ summary: tr('copied') })
         } catch (e) { return fail(fmt(tr('errCopy'), { e: e && e.message ? e.message : String(e) })) }
       })
@@ -2240,7 +2339,10 @@ export default function () {
 
       registerRpc('reset', withRepo(async (repo, args) => {
         const mode = args && args.mode === 'hard' ? 'hard' : 'soft'
-        return await runWriteOp('git.reset', repo, () => opReset(repo, mode))
+        // expectHash 只接受短 hash 形态的输入（面板 status.headShort 回传的就是那个），
+        // 不做任何猜测性解析：拿不到就退化成老行为（不校验）。
+        const expectHash = args && typeof args.expectHash === 'string' && /^[0-9a-f]{4,40}$/i.test(args.expectHash.trim()) ? args.expectHash.trim() : ''
+        return await runWriteOp('git.reset', repo, () => opReset(repo, mode, expectHash))
       }))
 
       registerRpc('clean', withRepo((repo) => runWriteOp('git.clean', repo, () => opClean(repo))))

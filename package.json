@@ -1,6 +1,6 @@
 {
   "name": "@dsh-local/git-panel",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Git workspace panel for DSH Web: repo discovery, stage/commit like VS Code Source Control, AI-generated commit messages via configurable rules, history graph and diff preview",
   "private": true,
   "type": "module",
@@ -21,14 +21,22 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-client-runtime"
+        "@deepseek-ai/dsh-client-connection"
       ],
       "immediately": true
     }
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "lint": "node scripts/lint-client.mjs",
+    "pretest": "node scripts/build.mjs",
+    "test": "node scripts/test-write-result.mjs && node scripts/check-client-bundle.mjs",
     "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "acorn": "^8.18.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.10.0",
+    "react": "^19.3.0"
   }
 }
