@@ -196,6 +196,9 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
 
   // 行内展开的文件列表：首次展开才请求（bumpFiles 触发展开区行高重算）
   const ensureFiles = (hash) => ensureCached(filesCache, hash, 'commitFiles', (r) => ({ loading: false, files: r.files || [] }), bumpFiles)
+  // 展开区点文件打开 diff 前先收起悬停明细：DiffDrawer 从面板左缘滑出、与浮层同处一片区域，
+  // 且浮层 z-index 更高，不收起会盖在 diff 抽屉上
+  const openDiffFromFiles = (repo, item, group) => { closeHover(); onOpenDiff(repo, item, group) }
   const toggleExpand = (hash) => {
     closeHover()
     const opening = expandedRef.current !== hash
@@ -258,14 +261,15 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
     rows.push(React.createElement('div', {
       key: e.hash, className: 'gp-grow' + (isOpen ? ' gp-grow-sel' : ''), style: { top: tops[i], height: rowH },
       onClick: () => toggleExpand(e.hash),
-      onMouseEnter: (ev) => { if (!isOpen) showDetail(e.hash, ev.currentTarget, e.refs, e.short) },
+      // 悬停弹明细对普通行与展开行一视同仁（展开行移入同样弹出，不因 isOpen 抑制）
+      onMouseEnter: (ev) => { showDetail(e.hash, ev.currentTarget, e.refs, e.short) },
       onMouseLeave: scheduleHide
     },
       React.createElement('svg', { width: W, height: rowH, viewBox: '0 0 ' + W + ' ' + rowH, style: { display: 'block', flex: '0 0 auto' } }, els),
       isOpen
         ? React.createElement('div', { className: 'gp-grow-col' },
             React.createElement('div', { className: 'gp-grow-bar' }, subjectEl, refsEl, metaEl),
-            React.createElement(CommitFilesPanel, { e, repo, filesCache, diffSel, onOpenDiff }))
+            React.createElement(CommitFilesPanel, { e, repo, filesCache, diffSel, onOpenDiff: openDiffFromFiles }))
         : null,
       isOpen ? null : subjectEl,
       isOpen ? null : refsEl,
