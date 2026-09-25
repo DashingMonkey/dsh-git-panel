@@ -78,16 +78,30 @@ function computeGraph(entries) {
 const LANE_COLORS = ['#00bcf2', '#2d8844', '#ec5a5a', '#b18e35', '#8f4b8f', '#4ec9b0', '#e2a33d', '#d16ba5']
 const laneColor = (l) => LANE_COLORS[l % LANE_COLORS.length]
 
-// 解析 %D refs 装饰：区分当前分支/本地分支/远程分支/tag；origin/HEAD 为符号引用，始终隐藏
+// 解析 %D refs 装饰：区分当前分支/本地分支/远程分支/tag；origin/HEAD 为符号引用，始终隐藏。
+// host 以 --decorate=full 输出完整 refname（refs/heads/、refs/remotes/、refs/tags/），
+// 必须按前缀分类——本地分支名可以含 '/'（如 backup/pre-msg-rewrite），
+// 「名字带斜杠 = 远程分支」的启发式会把它误判成远程分支（与 VS Code _resolveHistoryItemRefs 同策略）。
+// 兼容旧短名格式（无 refs/ 前缀）：tag: 前缀之外仍按带斜杠启发式兜底。
 function parseRefs(refsStr) {
   const out = { current: '', branches: [], remotes: [], tags: [] }
+  const push = (kind, n) => { if (n && out[kind].indexOf(n) < 0) out[kind].push(n) }
   String(refsStr || '').split(',').map((s) => s.trim()).filter(Boolean).forEach((r) => {
     const m = r.match(/^HEAD -> (.+)$/)
-    if (m) { out.current = m[1]; return }
-    if (r === 'HEAD' || r === 'origin/HEAD') return
-    if (r.lastIndexOf('tag: ', 0) === 0) { out.tags.push(r.slice(5)); return }
-    if (r.indexOf('/') >= 0) out.remotes.push(r)
-    else out.branches.push(r)
+    const name = m ? m[1] : r
+    if (name === 'HEAD' || name === 'origin/HEAD' || name === 'refs/remotes/origin/HEAD') return
+    if (name.lastIndexOf('tag: ', 0) === 0) { push('tags', name.slice(5).replace(/^refs\/tags\//, '')); return }
+    if (name.lastIndexOf('refs/heads/', 0) === 0) {
+      if (m) out.current = name.slice(11)
+      else push('branches', name.slice(11))
+      return
+    }
+    if (name.lastIndexOf('refs/remotes/', 0) === 0) { push('remotes', name.slice(13)); return }
+    if (name.lastIndexOf('refs/tags/', 0) === 0) { push('tags', name.slice(10)); return }
+    // 旧短名格式兜底
+    if (m) { out.current = name; return }
+    if (name.indexOf('/') >= 0) push('remotes', name)
+    else push('branches', name)
   })
   return out
 }

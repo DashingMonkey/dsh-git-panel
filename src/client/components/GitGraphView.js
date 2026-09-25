@@ -96,6 +96,11 @@ function CommitDetailPop({ hover, detailCache, onMouseEnter, onMouseLeave }) {
 
 function GitGraphView({ repo, onOpenDiff, diffSel }) {
   const [state, setState] = React.useState({ loading: true, entries: [], error: '', hasMore: true, loadingMore: false })
+  // ref 范围（对齐 VS Code SCM Graph 的默认过滤）：'auto' = 当前分支 + 上游（默认，单线），
+  // 'all' = 所有分支/标签。切换后从第一页整体重拉。
+  const [view, setView] = React.useState('auto')
+  const viewRef = React.useRef(view)
+  viewRef.current = view
   const [hover, setHover] = React.useState(null)
   const [, bumpHover] = React.useReducer((c) => c + 1, 0)
   // 行内展开：手风琴式，expanded 为当前展开提交的 hash
@@ -120,13 +125,14 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
     if (append) setState((s) => ({ ...s, loadingMore: true }))
     else if (!soft) setState((s) => ({ ...s, loading: true, error: '' }))
     try {
-      const r = await callRpc('log', { repoId: repo.id, skip, limit: PAGE })
+      const r = await callRpc('log', { repoId: repo.id, skip, limit: PAGE, view })
+      if (viewRef.current !== view) return // 切换视图后的迟到响应丢弃，避免旧视图数据盖掉新视图
       if (r && r.ok) {
         const list = append ? stateRef.current.entries.concat(r.entries || []) : (r.entries || [])
         setState({ loading: false, loadingMore: false, error: '', entries: list, hasMore: !!r.hasMore })
       } else setState((s) => ({ ...s, loading: false, loadingMore: false, error: (r && r.error) || tr('historyLoadFailed') }))
     } catch (e) { setState((s) => ({ ...s, loading: false, loadingMore: false, error: e && e.message ? e.message : String(e) })) }
-  }, [repo.id])
+  }, [repo.id, view])
 
   React.useEffect(() => { loadPage(0, false) }, [loadPage])
 
@@ -218,7 +224,7 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
     const lane = graph.rowLane[i]
     const merges = graph.rowMerge[i] || []
     const active = graph.rowActive[i] || []
-    const isHead = /HEAD/.test(e.refs || '')
+    const isHead = /(^|,\s*)HEAD( -> |,|$)/.test(e.refs || '')
     const isOpen = i === expandedIdx
     const rowH = heights[i] || ROWH
     const els = []
@@ -284,11 +290,22 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
             rows,
             state.loadingMore ? React.createElement('div', { className: 'gp-grow-more', style: { top: total, height: ROWH } }, React.createElement('span', { className: 'gp-spinner' }), tr('loadingMore')) : null))
 
+  // 视图切换（当前分支 / 全部）：收起悬停与展开行后整体重拉
+  const switchView = (v) => {
+    if (v === view) return
+    closeHover()
+    setExpanded(null)
+    setView(v)
+  }
+  const bar = React.createElement('div', { className: 'gp-graph-bar' },
+    React.createElement('button', { className: 'gp-graph-tab' + (view === 'auto' ? ' gp-graph-tab-on' : ''), title: tr('graphViewCurrentTip'), onClick: () => switchView('auto') }, tr('graphViewCurrent')),
+    React.createElement('button', { className: 'gp-graph-tab' + (view === 'all' ? ' gp-graph-tab-on' : ''), title: tr('graphViewAllTip'), onClick: () => switchView('all') }, tr('graphViewAll')))
+
   // 悬停唤出的提交详情浮层（见 CommitDetailPop），可移入浮层内查看
   const pop = hover ? React.createElement(CommitDetailPop, { hover, detailCache, onMouseEnter: cancelHide, onMouseLeave: scheduleHide }) : null
 
   return React.createElement('div', { className: 'gp-history-body' },
-    React.createElement('div', { className: 'gp-graph-wrap' }, body),
+    React.createElement('div', { className: 'gp-graph-wrap' }, bar, body),
     pop)
 }
 export { GitGraphView }

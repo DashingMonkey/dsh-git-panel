@@ -2358,7 +2358,32 @@ export default function () {
         // 分页读取：--topo-order + --skip/-n，供前端按滚动条动态加载（--graph 不支持 --skip）
         const skip = Math.max(0, Number(args && args.skip) || 0)
         const limit = Math.min(500, Math.max(20, Number(args && args.limit) || 200))
-        const r = await gitRun(repo.path, ['log', '--all', '--topo-order', '--date=iso-strict', '--format=%x1e%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1f%D%x1f%P', '--skip', String(skip), '-n', String(limit)], { maxBytes: 4 * 1024 * 1024, timeoutMs: 60000 })
+        // ref 范围对齐 VS Code SCM Graph 的默认 'auto' 过滤：只画「当前分支 + 其上游」可达的提交，
+        // 不用 --all——那会把 backup/* 备份分支之类的旁支整条画出来（rebase 改写 message / 强推后
+        // 备份分支还指着旧链，图上就是第二条线，且线上是改写前的旧提交信息）。view='all' 保留全景入口。
+        // --decorate=full 让 %D 输出完整 refname（refs/heads/、refs/remotes/、refs/tags/），
+        // 供前端按前缀精确分类：本地分支名可以含斜杠（如 backup/pre-msg-rewrite），
+        // 不能按「名字带斜杠 = 远程分支」猜（VS Code _resolveHistoryItemRefs 同策略）。
+        const view = args && args.view === 'all' ? 'all' : 'auto'
+        let revArgs
+        if (view === 'all') {
+          revArgs = ['--all']
+        } else {
+          const [headR, upR] = await Promise.all([
+            gitRun(repo.path, ['rev-parse', '-q', '--verify', 'HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
+            gitRun(repo.path, ['rev-parse', '-q', '--verify', '@{u}'], { maxBytes: 4096, timeoutMs: 30000 })
+          ])
+          const revs = []
+          for (const rr of [headR, upR]) {
+            if (rr.code !== 0) continue
+            const h = (rr.text || '').trim()
+            if (h && revs.indexOf(h) < 0) revs.push(h)
+          }
+          // 仓库还没有任何提交（unborn HEAD 且无上游）：给空历史而不是 fatal 报错
+          if (revs.length === 0) return ok({ entries: [], skip, hasMore: false, view })
+          revArgs = revs
+        }
+        const r = await gitRun(repo.path, ['log', ...revArgs, '--topo-order', '--date=iso-strict', '--decorate=full', '--format=%x1e%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1f%D%x1f%P', '--skip', String(skip), '-n', String(limit)], { maxBytes: 4 * 1024 * 1024, timeoutMs: 60000 })
         if (r.code !== 0) return fail(fmt(tr('errLog'), { e: (r.errText || r.text).slice(0, 200) }))
         const entries = []
         for (const line of (r.text || '').split('\n')) {
@@ -2370,7 +2395,7 @@ export default function () {
           const fields = line.slice(mark + 1).split('\u001f')
           entries.push({ hash: fields[0] || '', short: fields[1] || '', author: fields[2] || '', date: fields[3] || '', subject: fields[4] || '', refs: (fields[5] || '').trim(), parents: (fields[6] || '').split(' ').filter(Boolean) })
         }
-        return ok({ entries, skip, hasMore: entries.length === limit })
+        return ok({ entries, skip, hasMore: entries.length === limit, view })
       }))
 
       registerRpc('commitDetail', withRepo(async (repo, args) => {

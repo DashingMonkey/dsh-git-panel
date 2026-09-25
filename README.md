@@ -15,7 +15,7 @@
   cherry-pick 冲突同样成组，但收尾出口在终端，面板只给指引）
 - diff 抽屉图片预览：png/jpg/gif/webp 等图片直读旧/新两版并排对比，点击任一图片全屏 1:1 原始尺寸查看（棋盘格透明底、超出屏幕可滚动、左右方向键切换新旧版本），标签显示像素与大小（单图上限 8MB）
 - LLM 按可配置规则生成 commit message（YAML 规则，全局 + 仓库级覆盖，修改即生效）
-- Git 历史图谱（SVG lane 布局 + 无限滚动）、Pull / 分支 / 推送 / Stash / Reset / Clean
+- Git 历史图谱（SVG lane 布局 + 无限滚动；默认只画当前分支 + 上游的单线视图，可切「全部」看所有分支/标签）、Pull / 分支 / 推送 / Stash / Reset / Clean
 - 写操作带审计日志；中英双语 UI；零新增 npm 依赖
 
 ## 安装
