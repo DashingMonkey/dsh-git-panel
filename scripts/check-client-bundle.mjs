@@ -54,7 +54,7 @@ if (plugin.__esModule === true) {
     '最终交给 cordis 的是 default（工厂函数）而非插件对象，apply() 永不执行（按钮消失且无报错）。' +
     '修 scripts/build.mjs 的 factory 出口：返回裸的 { apply, inject }。')
 }
-if (JSON.stringify(plugin.inject) !== JSON.stringify(['slots', 'connection', 'workspaces'])) {
+if (JSON.stringify(plugin.inject) !== JSON.stringify(['slots', 'connection', 'workspaces', 'uiWorkspace'])) {
   fail('exports.inject 不符: ' + JSON.stringify(plugin.inject))
 }
 
@@ -96,7 +96,14 @@ if (Object.prototype.toString.call(plugin) === '[object Module]' ||
   fail('exports 带 Symbol.toStringTag（"[object Module]"）—— 出口面应保持与旧产物同形的裸对象。')
 }
 
-// 3) 跑 apply：打桩 cordis ctx（slots/locale/timer/connection/workspaces）
+// 3) 跑 apply：打桩 cordis ctx（slots/locale/timer/connection/workspaces/uiWorkspace）
+// uiWorkspace.selection 桩：带监听器的快照 store，验证「当前会话镜像」订阅路径真的被接上。
+const selectionListeners = new Set()
+let selectionSnap = { sessionId: 'sess-a' }
+const selection = {
+  getSnapshot: () => selectionSnap,
+  subscribe(l) { selectionListeners.add(l); return () => selectionListeners.delete(l) }
+}
 const registered = []
 const slots = {
   inject: (name, setup) => { setup(); registered.push(name) },
@@ -110,7 +117,8 @@ const ctx = {
       timer: { timeout: (fn) => { return () => {} } },
       locale: { getLocale: () => ({ active: 'zh' }) },
       connection: { rpc: { call: (channel, method) => { rpcMethods.push(method); return Promise.resolve({ ok: true, value: {} }) } } },
-      workspaces: {}
+      workspaces: {},
+      uiWorkspace: { selection }
     }[key]
   },
   on() { return () => {} }
@@ -129,10 +137,13 @@ if (!registered.includes('register:git-panel') || !registered.includes('register
   fail('slot register 未发生: ' + registered.join(', '))
 }
 if (!rpcMethods.includes('setLocale')) fail('apply 未上报 setLocale')
+// 当前会话镜像：apply 时应订阅 uiWorkspace.selection（监听器挂上）；卸载后应解绑。
+if (selectionListeners.size !== 1) fail('apply 未订阅 uiWorkspace.selection（切换对话不会跟随）')
 try {
   dispose()
 } catch (e) {
   fail('卸载清理抛错: ' + e.stack)
 }
+if (selectionListeners.size !== 0) fail('卸载后 selection 订阅未解绑')
 
-console.log('✓ 冒烟通过：bundle 装载 → factory(require react=' + reactRequired + ') → apply（3 个 slot 注册 + setLocale）→ 卸载，全链路无异常')
+console.log('✓ 冒烟通过：bundle 装载 → factory(require react=' + reactRequired + ') → apply（3 个 slot 注册 + setLocale + selection 订阅）→ 卸载，全链路无异常')

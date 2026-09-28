@@ -147,9 +147,11 @@ const clientBundle =
   '\t\t// 见构建脚本 3b 段注释：只从这里取插件对象，别再把 namespace 交出去。\n' +
   '\t\tvar __gitPanelPlugin = index_default();\n' +
   '\t\t// inject 声明是 cordis 的等待清单：fiber 会等服务激活后才执行 apply。\n' +
-  '\t\t// workspaces 必须在此声明 —— package.json 里 dsh.client.inject 的包级边只是\n' +
-  '\t\t// 装载元数据（不排序 apply），apply 时序竞态会让 ctx.get(\'workspaces\') 抓到 undefined。\n' +
-  '\t\treturn { apply: __gitPanelPlugin.apply, inject: ["slots", "connection", "workspaces"] };\n' +
+  '\t\t// workspaces / uiWorkspace 必须在此声明 —— package.json 里 dsh.client.inject 的\n' +
+  '\t\t// 包级边只是装载元数据（不排序 apply），apply 时序竞态会让 ctx.get 抓到 undefined。\n' +
+  '\t\t// uiWorkspace（dsh-client-ui-workspace 提供，0.1.7+）的 selection 是「当前会话」\n' +
+  '\t\t// 的唯一可靠信号，GitPanelMain 靠它实现切换对话后面板跟随工作区。\n' +
+  '\t\treturn { apply: __gitPanelPlugin.apply, inject: ["slots", "connection", "workspaces", "uiWorkspace"] };\n' +
   '\t}\n' +
   '});\n'
 // ---- 3c) 产物指纹写进首行注释：产物里带一个可对账的构建标识 ----

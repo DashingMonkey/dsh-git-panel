@@ -11,20 +11,68 @@ import { DockSync, RAIL_W } from './dock.js'
 import { RepoCard } from './RepoCard/index.js'
 import { DiffDrawer } from './DiffDrawer.js'
 import { LayoutSettingsModal } from './modals.js'
-function workspaceOfSession(st, sessionId) {
-  if (!st || !Array.isArray(st.items)) return null
-  const items = st.items
-  let w = null
-  if (sessionId) w = items.find((x) => Array.isArray(x.sessionIds) && x.sessionIds.indexOf(sessionId) >= 0) || null
-  if (!w && st.recentWorkspaceId) w = items.find((x) => x.workspaceId === st.recentWorkspaceId) || null
-  return w
+
+// 客户端扫描结果缓存（root → repos）：切换工作区/对话时先呈现上次结果，后台再
+// 静默重扫（宿主侧另有内存+磁盘两级仓库发现缓存，命中即回）。没有这层时，每次
+// 切换都会把整个列表换成「扫描中」转圈——即便宿主命中缓存也白闪一下。
+// 模块级单例：面板开合、对话切换都复用；仅 bundle 重装载才清零。
+const scanResultsByRoot = new Map()
+
+// DSH 0.1.7 起两个 store 的快照形状变了，旧解析字段双双消失：
+//   sessions   { current, ... }                          → { ids, byId, phase, projectionsBySession }
+//   workspaces { items, recentWorkspaceId, ... }          → { items, archivedSessionIds, pinnedSessionIds, state, phase, error }
+// 后果：旧路径全部落空，面板永远解析不到工作区，停在「未打开工作空间」空态。
+// 修复：兼容新旧两种形状，优先级从高到低——
+//   1) hintSessionId：shell 当前主区会话（uiWorkspace.selection 镜像，切换对话即
+//      更新，见 index.js 的订阅）。会话反查工作区，这是「切换对话 → 面板跟随」的关键。
+//   2) 旧版字段：sessSt.current 反查 / wsSt.recentWorkspaceId 回退（旧版 DSH 兼容）。
+//   3) 官方 recentWorkspace() 同款口径：工作区按其会话的最新 updatedAt 排序
+//     （byId 查会话摘要），无会话则回退 createdAt，取时间最新者（并列时 items
+//     顺序先者胜）。phase 未就绪时不计算，避免装载期闪错工作区。
+function resolveWorkspace(wsSt, sessSt, hintSessionId) {
+  if (!wsSt || !Array.isArray(wsSt.items) || wsSt.items.length === 0) return null
+  const items = wsSt.items
+  if (hintSessionId) {
+    const w = items.find((x) => Array.isArray(x.sessionIds) && x.sessionIds.indexOf(hintSessionId) >= 0)
+    if (w) return w
+  }
+  if (sessSt && sessSt.current) {
+    const w = items.find((x) => Array.isArray(x.sessionIds) && x.sessionIds.indexOf(sessSt.current) >= 0)
+    if (w) return w
+  }
+  if (wsSt.recentWorkspaceId) {
+    const w = items.find((x) => x.workspaceId === wsSt.recentWorkspaceId)
+    if (w) return w
+  }
+  if (wsSt.phase && wsSt.phase !== 'ready') return null
+  if (sessSt && sessSt.phase && sessSt.phase !== 'ready') return null
+  const byId = (sessSt && sessSt.byId) || {}
+  let best = null
+  let bestTime = -Infinity
+  for (const ws of items) {
+    let latest = -Infinity
+    for (const id of Array.isArray(ws.sessionIds) ? ws.sessionIds : []) {
+      const session = byId[id]
+      if (session !== undefined) latest = Math.max(latest, session.updatedAt)
+    }
+    if (latest === -Infinity) latest = Date.parse(ws.createdAt)
+    if (best === null || latest > bestTime) { best = ws; bestTime = latest }
+  }
+  return best
 }
 
 function GitPanelMain({ useSessions, useWorkspaces }) {
   const s = useStore()
-  const sessionId = typeof useSessions === 'function' ? useSessions((st) => (st && st.current) || undefined) : undefined
-  const wsPath = typeof useWorkspaces === 'function' ? useWorkspaces((st) => { const w = workspaceOfSession(st, sessionId); return w && w.path ? w.path : '' }) : ''
-  const wsTitle = typeof useWorkspaces === 'function' ? useWorkspaces((st) => { const w = workspaceOfSession(st, sessionId); return w && w.title ? w.title : '' }) : ''
+  // 整快照订阅后由 resolveWorkspace 统一解析（快照对象由 createSnapshotStore 缓存，
+  // 内容不变时引用稳定，不会造成额外渲染）。s.currentSessionId 是 shell 当前主区
+  // 会话（uiWorkspace.selection 镜像），切换对话即变 → 工作区重解析 → 重扫。
+  // sessionId 仅作 RPC 透传元数据（host 不消费），新版 store 已无 current，保持 undefined 即可。
+  const sessSnap = typeof useSessions === 'function' ? useSessions((st) => st) : null
+  const wsSnap = typeof useWorkspaces === 'function' ? useWorkspaces((st) => st) : null
+  const ws = React.useMemo(() => resolveWorkspace(wsSnap, sessSnap, s.currentSessionId), [wsSnap, sessSnap, s.currentSessionId])
+  const sessionId = sessSnap && sessSnap.current ? sessSnap.current : undefined
+  const wsPath = ws && ws.path ? ws.path : ''
+  const wsTitle = ws && ws.title ? ws.title : ''
   const [scan, setScan] = React.useState({ state: 'idle', root: '', repos: [], error: '' })
   const [diffSel, setDiffSel] = React.useState(null)
   // 关闭动效（关闭相位由 diffSel.closing 携带，所有关闭入口统一走 requestCloseDiff）：
@@ -58,9 +106,15 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
   // 的自动扫描与手动选根目录都允许命中缓存（切换项目秒开的关键路径）
   const doScan = React.useCallback(async (root, force) => {
     const seq = ++scanSeqRef.current
-    setScan((x) => ({ ...x, state: 'scanning', error: '' }))
+    // 客户端缓存命中：立即呈现上次的仓库列表（不清空卡片、不闪「扫描中」），
+    // 扫描转后台，返回后就地更新。切回刚看过的项目 = 零重载感。
+    const cached = !force && root && scanResultsByRoot.get(root)
+    if (cached) setScan({ state: 'done', root, repos: cached, error: '' })
+    else setScan((x) => ({ ...x, state: 'scanning', error: '' }))
     try {
       const res = await callRpc('scan', root ? (force ? { root, force: true } : { root }) : {})
+      // 缓存按 root 各自独立，过期响应也照常入缓存（该 root 自己的最新数据）
+      if (res && res.ok && res.root) scanResultsByRoot.set(res.root, res.repos || [])
       if (seq !== scanSeqRef.current) return
       if (res && res.ok) {
         setScan({ state: 'done', root: res.root, repos: res.repos || [], error: '' })
@@ -69,10 +123,13 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
         // 各自重新 loadStatus（仓库 id 不变时卡片不重挂载，必须靠这里触发，否则看到旧状态）。
         store.set((st) => ({ ...st, refreshTick: st.refreshTick + 1, lastOp: 'rescan', lastOpRepoId: null }))
       }
+      // 后台刷新失败但已有缓存内容在展示时，不清空列表，只弹错误提示
+      else if (cached) pushToast('error', (res && res.error) || tr('scanFailed'))
       else setScan((x) => ({ ...x, state: 'error', error: (res && res.error) || tr('scanFailed') }))
     } catch (e) {
       if (seq !== scanSeqRef.current) return
-      setScan((x) => ({ ...x, state: 'error', error: e && e.message ? e.message : String(e) }))
+      if (cached) pushToast('error', e && e.message ? e.message : String(e))
+      else setScan((x) => ({ ...x, state: 'error', error: e && e.message ? e.message : String(e) }))
     }
   }, [])
 

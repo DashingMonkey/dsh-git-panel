@@ -26,8 +26,9 @@
  *   弹窗（含 fixed 定位的 modal）必须挂在 overlay 层的根 Fragment 外侧，否则堆叠上下文
  *   会限制遮罩范围（RepoCard / GitPanelMain 的 return 均是 Fragment 外层挂弹窗）。
  *
- * 依赖的 Client 服务（ctx.get 可选读取）：slots / timer / workspaces(openPath)；
- * exports.inject 硬依赖见 lib/client.js 模板（slots / connection / workspaces）。
+ * 依赖的 Client 服务（ctx.get 可选读取）：slots / timer / locale / workspaces(openPath) /
+ * uiWorkspace（selection=当前会话，切换对话后面板跟随的信号源）；
+ * exports.inject 硬依赖见 lib/client.js 模板（slots / connection / workspaces / uiWorkspace）。
  */
 import React from 'react'
 import { initClientServices } from './runtime.js'
@@ -58,6 +59,25 @@ export default function () {
       // 旧单文件里 store 是每次 apply 新建的；模块单例下等价打回初始态
       resetStore()
 
+      // 跟随当前会话（DSH 0.1.7+）：shell 把主区当前会话放在 uiWorkspace 服务的
+      // selection store 里（{ sessionId, subagentAddress? } 快照，每次切换对话即
+      // set，并持久化为 dsh.sessions.current；无会话时为 {}）。新版 sessions store
+      // 已无 current 字段，这里是唯一可靠的「当前会话」信号。镜像进本插件 store，
+      // GitPanelMain 据此优先解析当前工作区（uiWorkspace 已加入 bundle 的 inject，
+      // 保证 apply 时可读）。旧版 DSH 没有该服务，留空走旧字段/最近工作区兜底。
+      let disposeSelection = null
+      const uiWs = ctx.get('uiWorkspace')
+      const sel = uiWs && uiWs.selection
+      if (sel && typeof sel.getSnapshot === 'function' && typeof sel.subscribe === 'function') {
+        const syncSelection = () => {
+          const snap = sel.getSnapshot()
+          const sid = snap && snap.sessionId ? snap.sessionId : null
+          if (store.get().currentSessionId !== sid) store.set((st) => ({ ...st, currentSessionId: sid }))
+        }
+        syncSelection()
+        disposeSelection = sel.subscribe(syncSelection)
+      }
+
       const disposeCss = injectCss(PANEL_CSS)
 
       slots.inject('shell.overlay', () => slots.register(
@@ -85,6 +105,7 @@ export default function () {
       // 插件卸载/热重载时移除文件态注入的 <style>（动态包形态由宿主 styles 服务管理）
       // 并清除停靠几何痕迹（body 属性/CSS 变量/兜底内联样式），防止页面残留挤压
       return () => {
+        if (disposeSelection) disposeSelection()
         disposeCss()
         applyDockGeometry(false, 0, false)
       }
