@@ -6,6 +6,7 @@ import { tr, fmt } from '../../i18n.js'
 import { pushToast, store, useStore } from '../../store.js'
 import { icon } from '../../icons.js'
 import { GROUP_META, glyphOf, rowKey, splitPath } from '../../lib/util.js'
+import { getMessageDraft, setMessageDraft } from '../../messageDraft.js'
 import { useMultiSelect } from '../../hooks/useMultiSelect.js'
 import { ConfirmModal } from '../modals.js'
 import { GitGraphView } from '../GitGraphView.js'
@@ -18,7 +19,20 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
   const [branchMenu, setBranchMenu] = React.useState({ open: false, loading: false, data: null, error: '', creating: false, newName: '' })
   const [moreMenu, setMoreMenu] = React.useState({ open: false })
   const [busy, setBusy] = React.useState(null)
-  const [message, setMessage] = React.useState('')
+  // 提交信息输入框内容。**不是**纯组件状态：草稿按仓库绝对路径记在 messageDraft.js，
+  // 因为本卡片会卸载重挂——面板折叠/展开（isCollapsed 时 body 整棵为 null）、切换
+  // 工作空间/会话（重扫后 scan.repos 换列表）。放组件状态里，用户写了一半的提交信息
+  // 在这两种情况下必丢（这正是本状态搬家前的问题）。
+  // 懒初始化即写回：把本次读到的草稿登记为「最近写入」。
+  const [message, setMessage] = React.useState(() => {
+    const d = getMessageDraft(repo.path)
+    setMessageDraft(repo.path, d)
+    return d
+  })
+  // ⚠ **唯一写入口**：所有改输入框的地方都必须走它，草稿才会跟着更新。
+  // 下面第 95 行「提交成功清空」、textArea onChange、生成逐字写入、撤销恢复
+  // （CommitArea 的 setMessage prop）全都经此，四类路径自动同步，无一例外。
+  const updateMessage = (v) => { setMessage(v); setMessageDraft(repo.path, v) }
   // 放弃更改确认弹窗：null 或 { byGroup: {staged:[], unstaged:[], untracked:[]}, count }
   const [confirmDiscard, setConfirmDiscard] = React.useState(null)
   // 危险操作确认弹窗（Reset / Clean）：null | 'reset-soft' | 'reset-hard' | 'clean'
@@ -92,8 +106,20 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
   // 避免多仓库面板一次操作触发 4×N 条并发 git 命令）
   React.useEffect(() => { if (s.refreshTick > 0 && (s.lastOpRepoId == null || s.lastOpRepoId === repo.id)) loadStatus() }, [s.refreshTick, s.lastOpRepoId, repo.id, loadStatus])
   React.useEffect(() => {
-    if (s.lastOp === 'commit' && s.lastOpRepoId === repo.id && s.refreshTick > 0) setMessage('')
+    // "commit"：提交成功 → 清空输入框。必须走 updateMessage（唯一写入口），
+    // 否则只清了界面状态、草稿里还留着刚提交的那段话，下次挂载会把它倒灌回来。
+    if (s.lastOp === 'commit' && s.lastOpRepoId === repo.id && s.refreshTick > 0) updateMessage('')
   }, [s.refreshTick, s.lastOp, s.lastOpRepoId, repo.id])
+  // 跨仓库实例复用兜底：React 按渲染位置复用组件实例，若同一位置的 repo.path 变了，
+  // 上面的 useState 懒初始化不会重跑（初值只在挂载时求一次），输入框会残留上一个仓库
+  // 的内容。GitPanelMain 已把 repo.path 并入卡片 key（正常路径下这里不会命中），
+  // 但 key 万一被改回去，本 effect 仍能保证「换了仓库就换成该仓库自己的草稿」。
+  // 只依赖 repo.path：提交成功清空时 repo.path 不变，不会把旧草稿倒灌回来。
+  React.useEffect(() => {
+    const d = getMessageDraft(repo.path)
+    setMessage(d)
+    setMessageDraft(repo.path, d)
+  }, [repo.path])
 
   const handleWriteResult = (res, label) => {
     if (res && res.ok) {
@@ -433,7 +459,7 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     React.createElement('div', null,
       status.loading ? React.createElement('div', { className: 'gp-empty' }, tr('loadingStatus')) : status.error ? React.createElement('div', { className: 'gp-empty' }, status.error) :
         React.createElement('div', null,
-          React.createElement(CommitArea, { repo, sessionId, stagedPaths, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus, conflictedCount: totalConflicted, otherOp, pushFail, onPushFail: applyPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }),
+          React.createElement(CommitArea, { repo, sessionId, stagedPaths, message, setMessage: updateMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus, conflictedCount: totalConflicted, otherOp, pushFail, onPushFail: applyPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }),
           data && data.statusError ? React.createElement('div', { className: 'gp-empty gp-danger' }, fmt(tr('gitStatusFailed'), { e: data.statusError })) : null,
           // 冲突提示条：未解决冲突 / 合并进行中 / rebase 等进行中时出现，给出动作说明 + 出口按钮。
           // 「完成合并」只在「合并进行中且冲突已全部解决、暂存为空」时出现——那种状态下解决

@@ -319,7 +319,9 @@ export default function () {
             handle = subprocess.spawn({
               argv,
               cwd,
-              env: { GIT_TERMINAL_PROMPT: '0' },
+              // opts.env 由调用方覆盖（gitRun 传 GIT_TERMINAL_PROMPT / GIT_OPTIONAL_LOCKS）；
+              // 不传时保持「防交互挂起」这一条基线
+              env: opts.env || { GIT_TERMINAL_PROMPT: '0' },
               stdio: {
                 stdin: opts.stdinData ? { data: opts.stdinData } : 'ignore',
                 stdout: { maxBytes, spill: { maxBytes: 64 * 1024 * 1024 } },
@@ -346,8 +348,66 @@ export default function () {
         })
       }
 
+      // ============ git 锁竞争重试（index.lock / HEAD.lock） ============
+      // ⚠ 本段逻辑与 src/gitRetry.js 逐字一致：那边是**参照实现**，只供脚本单独跑测试
+      // （scripts/test-git-lock-retry.mjs 会做同步断言）。这里不能改成 import——host.js
+      // 刻意保持零 import：文件态 npm 包把它原样复制出去单独装载，动态 Cordis 包则把它的
+      // 函数体拼进 code.host，两种形态下 import 都要断。改这里就同步改那边。
+      //
+      // 为什么值得加：`git commit` 抢不到 index.lock 时直接 exit 128 失败，而竞争**天然是
+      // 瞬时的**——抢锁的对方（我们自己只读的 `git status` 刷新 index、别的编辑器、杀毒
+      // 软件、上一个被终止的 git 进程尚未释放句柄）通常几十到几百毫秒就放手。实测本仓库
+      // 面板：07:25:22 第一次「提交并推送」报 index.lock 失败、07:26:02 原样重试即成功
+      // （审计日志 fail:git.commit → ok:git.commit，中间没有任何 git 写操作）。用户不该为
+      // 这种瞬时竞争手动重试，也不该看到让人误以为「有 crashed 进程要手动删锁」的原文。
+      //
+      // 判据三条同时成立（宁漏勿误）：exit 128（git 的 fatal）+ 文案含锁文件名 +
+      // 文案含 "File exists"——同位置的 "Unable to create …" 在权限不足/磁盘满时也会出现，
+      // 那两种重试一万次也没用，必须排除。锁在原文里是整条正斜杠路径
+      //（'D:/a/b/.git/index.lock'），所以只认文件名，不认 ".git/index.lock"。
+      const LOCK_MARKERS = ['index.lock', 'HEAD.lock']
+      const LOCK_RETRY_DELAYS_MS = [180, 500] // 两次重试，累计 680ms
+      function isLockContention(exitCode, stderrText, stdoutText) {
+        if (exitCode !== 128) return false
+        const text = String(stderrText || '') + '\n' + String(stdoutText || '')
+        if (text.indexOf('File exists') < 0) return false
+        for (const marker of LOCK_MARKERS) if (text.indexOf(marker) >= 0) return true
+        return false
+      }
+
       function gitRun(repoPath, args, opts) {
-        return spawnRaw(['git', '-c', 'core.quotepath=false', '-c', 'color.ui=false', '-c', 'core.pager=cat'].concat(args), repoPath, opts)
+        // 环境：GIT_TERMINAL_PROMPT=0 防交互挂起；readOnly 的命令（git status 等）再加
+        // GIT_OPTIONAL_LOCKS=0 —— 只读命令默认会「顺手刷新并写回 index」，那就得抢
+        // index.lock，正是与面板自己的提交互撞的来源（面板每 4s 自动轮询一次 status）。
+        // 关掉它只是不写回这个纯优化产物，输出完全一样，却把面板内部这一路竞争直接消掉。
+        const env = { GIT_TERMINAL_PROMPT: '0' }
+        if (opts.readOnly) env.GIT_OPTIONAL_LOCKS = '0'
+        const argv = ['git', '-c', 'core.quotepath=false', '-c', 'color.ui=false', '-c', 'core.pager=cat'].concat(args)
+        // 锁竞争重试（见上）。重试之间的等待必须**不阻塞事件循环**：本进程同时跑着
+        // RPC、仓库轮询、LLM 流式生成，而且持锁的对方完全可能就是同进程派出去的另一条
+        // git（面板的只读 status / diff）。曾经用 Atomics.wait 做同步等待，结果把整个
+        // 宿主事件循环冻住 680ms——同进程的定时器全被推迟，锁的释放反而被自己的等待
+        // 拖后（端到端测试里锁持有者到 1059ms 才被调度，而重试在 1007ms 就放弃了）。
+        const delays = LOCK_RETRY_DELAYS_MS
+        const sleepFor = (ms) => {
+          if (timer && typeof timer.timeout === 'function') {
+            return new Promise((resolve) => {
+              try { timer.timeout(resolve, ms) } catch (e) { resolve() }
+            })
+          }
+          // 动态包沙箱下 timer 缺失：退化成"不等待的立即重试"（重试本身仍有价值，
+          // 只是少了那几十毫秒的让位窗口），绝不在这里同步阻塞。
+          return Promise.resolve()
+        }
+        const attempt = async (i) => {
+          const r = await spawnRaw(argv, repoPath, { stdinData: opts.stdinData, maxBytes: opts.maxBytes, timeoutMs: opts.timeoutMs, env })
+          if (i < delays.length && isLockContention(r.code, r.errText, r.text)) {
+            await sleepFor(delays[i])
+            return attempt(i + 1)
+          }
+          return r
+        }
+        return attempt(0)
       }
 
       // stdout 原始字节收集（pipe 模式）：cat-file blob 输出的图片字节不能经
@@ -953,7 +1013,7 @@ export default function () {
         const [branchR, headR, statusR, upR, mergeHeadR] = await Promise.all([
           gitRun(repo.path, ['symbolic-ref', '--short', '-q', 'HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
           gitRun(repo.path, ['rev-parse', '--short', 'HEAD'], { maxBytes: 4096, timeoutMs: 30000 }),
-          gitRun(repo.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { maxBytes: 4 * 1024 * 1024, timeoutMs: 30000 }),
+          gitRun(repo.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { maxBytes: 4 * 1024 * 1024, timeoutMs: 30000, readOnly: true }),
           gitRun(repo.path, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { maxBytes: 4096, timeoutMs: 30000 }),
           gitRun(repo.path, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { maxBytes: 4096, timeoutMs: 30000 })
         ])
@@ -1908,6 +1968,15 @@ export default function () {
       // 目录只激活既有窗口——旧窗口落在其他虚拟桌面/不可见状态时用户毫无感知，且后台进程
       // 经 ShellExecute 起的窗口没有前台权限。explorer.exe 显式开新窗口：新窗口总落在当前
       // 活动虚拟桌面，且由常驻交互态 shell 进程创建，能正常置前。
+      //
+      // ⚠ DSH 0.2.x 起 subprocess 的 Windows 落地改为 runner 进程经 CreateProcessW 直接
+      // 创建目标：STARTUPINFO 带 STARTF_USESHOWWINDOW + SW_HIDE（隐藏初始窗口，见
+      // dsh-win32-process 的 spawnCurrentTokenJobProcess）。explorer.exe 遵循该 show
+      // state——直接 spawn 它，窗口会以隐藏状态创建出来：RPC 返回 ok、无报错、桌面上
+      // 却什么都不出现，且每点一次就多攒一个看不见的 explorer 进程/窗口（0.2.0-rc.2
+      // 实测如此）。改为经 cmd 的 start 间接拉起：ShellExecuteEx 用正常 show state
+      // 创建 explorer 进程，窗口可见；仍保留 explorer.exe 的「每次点击开新窗口」语义
+      //（start 直接开目录会激活既有窗口，那正是当初要避开的行为）。
       registerRpc('openInExplorer', async (args) => {
         const p = args && args.path
         if (!p || typeof p !== 'string') return fail('path required')
@@ -1917,13 +1986,20 @@ export default function () {
         let info = null
         try { info = await fs.stat(target) } catch (e) { /* ignore */ }
         if (!info || info.type !== 'directory') return fail(fmt(tr('errNotDir'), { p }))
-        const cmd = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open'
         // fs.resolve 的返回是服务对象而非字符串，进进程参数前必须经 fs.processPath 摊平
         // （同 discoverRepos 的 rootNorm 处理），否则 child_process 报 options.cwd 类型错误
         const procPath = fs.processPath(target) || p
         // explorer.exe 委托给常驻 shell 后即刻退出，退出码语义不可靠（委托成功也可能非零），
         // 只把 spawn 级失败当作错误，不以退出码判定成败
-        try { await spawnRaw([cmd, procPath], procPath, { timeoutMs: 15000 }) } catch (e) { return fail(e && e.message ? e.message : String(e)) }
+        try {
+          if (process.platform === 'win32') {
+            // 空标题参数 "" 让 start 把后面的带引号路径当程序参数而非窗口标题
+            await spawnRaw(['cmd.exe', '/d', '/s', '/c', 'start', '', 'explorer.exe', procPath], procPath, { timeoutMs: 15000 })
+          } else {
+            const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open'
+            await spawnRaw([cmd, procPath], procPath, { timeoutMs: 15000 })
+          }
+        } catch (e) { return fail(e && e.message ? e.message : String(e)) }
         return ok()
       })
 

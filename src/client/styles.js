@@ -17,6 +17,20 @@ const injectCss = (css) => {
 }
 
 export const PANEL_CSS = `
+/* ===== 桌面版（Electron）标题栏避让 =====
+   桌面版窗口无系统边框，外壳用 html[data-windows-titlebar]（Windows）/
+   html[data-platform="darwin"]（macOS）标出顶部拖动区，并定义
+   --dsh-frame-top-clearance（Windows 下 = 标题栏高；macOS 下 48px）。Web 版没有这两个
+   标记与变量（var 回退 0px），因此本组规则在浏览器里**完全无副作用**。
+   不加这组规则时，满高的 fixed 覆盖层（面板/竖条/diff 抽屉与遮罩）会盖住标题栏的
+   拖动区与窗口控制按钮，桌面版下会挡操作。all:initial 之类整体重置不可取——
+   只逐项改 top，其余几何（left/right/bottom/width、滚动、z-index）保持原样。 */
+html[data-windows-titlebar] .gp-panel, html[data-platform="darwin"] .gp-panel,
+html[data-windows-titlebar] .gp-rail, html[data-platform="darwin"] .gp-rail,
+html[data-windows-titlebar] .gp-diff-backdrop, html[data-platform="darwin"] .gp-diff-backdrop,
+html[data-windows-titlebar] .gp-diff-drawer, html[data-platform="darwin"] .gp-diff-drawer {
+  top: var(--dsh-frame-top-clearance, 0px);
+}
 /* ===== 面板统一边框色 =====
    主题边框透明度太低（亮 4%/10%，暗 6%/12%），分割线肉眼难辨。面板内自定义两级：
    --gp-border-1 结构性分隔线/容器描边（标题栏、仓库卡片、提交区、历史、diff 等）

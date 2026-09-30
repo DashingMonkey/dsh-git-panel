@@ -232,7 +232,11 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
       scan.state === 'error' ? React.createElement('div', { className: 'gp-empty' }, scan.error) :
         scan.repos.length === 0 ? React.createElement('div', { className: 'gp-empty' }, tr('noRepos')) :
           scan.repos.map((r) => React.createElement(RepoCard, {
-            key: r.id, repo: r, sessionId, diffSel, onCloseDiff: requestCloseDiff,
+            // key 带上绝对路径：repo.id 只是 root 内的相对路径，两个工作空间里同 id 的
+            // 仓库（如各自都有顶层 .git）在切换工作空间时会被 React 认成同一张卡片、
+            // 复用组件实例——提交信息（按 repo.path 记的草稿）就会串仓，输入框里留着
+            // 上一个工作空间的半截话。path 不同则整卡重挂，各凭自己的草稿初始化。
+            key: r.id + '\u0001' + r.path, repo: r, sessionId, diffSel, onCloseDiff: requestCloseDiff,
             // 普通点击行 = 单选该行并打开 diff；再次点击同一行（同 repo 同组同路径，
             // 提交文件还须同 hash）= 进入关闭相位（抽屉滑出动效播完才卸载，见
             // requestCloseDiff/finishCloseDiff）

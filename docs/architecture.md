@@ -51,17 +51,68 @@
   `stdin: 'ignore'` + `GIT_TERMINAL_PROMPT=0` 防交互挂起（无凭据时快速失败）；
   stdout 有界收集 + spill 文件；超时后树级 terminate。
 
+## 双环境适配：Web（命令行）与桌面版
+
+同一份插件同时适配 `dsh web` 与 DeepSeek Harness 桌面版。**宿主侧机制完全同构**，差别只在
+profile 与安装路径，因此代码层面零分叉——两者的差异全部收敛在安装脚本里。
+
+| 维度 | 命令行版 web | 桌面版 desktop |
+| --- | --- | --- |
+| profile 目录 | `$DSH_HOME/profiles/web` | `$DSH_HOME/profiles/desktop`（应用首次启动时创建） |
+| DSH 运行时 | npm 安装的 `@deepseek-ai/dsh` | 应用自带 `resources\app.asar\dsh`（版本随应用，独立于命令行版） |
+| Client 外壳 | `dsh-web-app` | `dsh-web-app`（**同一个 Web 外壳**，Electron 用 `dsh-app://` 承载并由 Host 注入 cookie） |
+| 插件面 | `dsh.client.platform: "web"` + `dsh.bundle.patch` | 同上（DSH 只认 `"web"` 这一个 platform 值，非 web 声明会被静默忽略） |
+| 可用服务 | `fs`/`subprocess`/`connection`/`webServer` | 同名服务齐备（`webServer.register({kind:'prefix'})`、`connection.requestRejection` 实测在 0.2.0-rc.2 一致） |
+| 数据目录 | `<profile>/git-panel/`（规则/缓存/审计） | 同左，但**位于 desktop profile 下**，与 web 那份互不相通 |
+| 安装方式 | 复制式（写 `node_modules` + patch 行） | 组合包式（应用自带 CLI 登记 `link:` 依赖 + `dsh.profile.bundles`） |
+| 生效方式 | 重启 `dsh web`（链接落点则刷新即可） | 完全退出应用后重新打开 |
+
+### 为什么桌面版不能走复制式
+
+DSH 把 `desktop` 列为**保留 profile 名**：`dsh --profile desktop` 的启动与配置导出会被直接
+拒绝（`profile "desktop" is managed exclusively by the Electron application`），插件管理也只
+有带 `manageDesktopProfile` 权限的**桌面应用自带 CLI** 才放行。它额外要求 profile 已由应用
+初始化，并在操作期间对 `profile/package.json` 加文件锁。
+
+运行时解析同样是两级的：`resolveBundleDir` 依次用 `[应用安装锚点, <profile>/package.json]`
+解析 bundle，profile 的 `node_modules` 由应用自带 pnpm 维护（`nodeLinker: hoisted`）。
+绕过 pnpm 直接复制文件会同时丢掉依赖记录与 bundles 登记，loader 根本不会装载它——所以
+`install.mjs` 在 desktop 分支改为调用应用自带 CLI：
+
+```
+<应用安装目录>\resources\runtime\cli\bin\dsh.cmd  plugin --profile desktop add <本仓库路径>
+```
+
+**探测桌面应用安装目录不能靠 `existsSync`**：`app.asar` 是单文件归档，
+`existsSync('...app.asar/dsh')` 在普通 Node 进程里恒为 `false`（只有 Electron 打过 asar
+补丁的 fs 才能穿透，本项目首版探测就是这么失效的）。`scripts/lib/profile.mjs` 的
+`asarEntryExists()` 自行解析归档头（16 字节 pickle + JSON 目录树）判断内部路径存在，
+再配合候选路径表（安装脚本向上 8 层 + `%LOCALAPPDATA%\Programs` + 各盘符
+`Program Files\DeepSeek Harness\resources` + `DSH_DESKTOP_RESOURCES` 显式指定）定位。
+
+### 残留与清理
+
+- desktop profile 的 patch 层由应用维护，本插件**不往里面写** `- insert:` 行；
+  卸载走 `plugin --profile desktop remove`（`uninstall.mjs` 会自动调用）。
+- 两个环境共用同一份 `src/`/`lib/`，但**各自独立加载**：改代码后
+  `npm run build` 对 `link:` 落点的两个 profile 同时生效（刷新/重启各自生效）。
+- 应用侧的兜底恢复：崩溃对话框的「Disable third-party plugins」会把 profile 的
+  `cordis.patch.yml` 改名备份并把 `dsh.profile.bundles` 重置回模板（第三方插件全部停用）。
+
 ## 目录结构
 
 | 文件 | 说明 |
 | --- | --- |
 | `src/host.js` | Host 半体：git 执行层（参数 100% 数组化、批量 pathspec 走 stdin）、BFS 仓库发现 + 两级扫描缓存（内存 + `$DSH_HOME/git-panel/scan-cache.json`）、提交规则读写 + 每仓库生效来源偏好注册表（`git-repos.json`，权威配置非缓存）、审计日志、LLM 生成、面向 Client 的 JSON RPC |
-| `src/client/` | Client 半体：面板全部 UI（`React.createElement`，无 JSX），模块化拆分——`index.js`（装配层：apply(ctx) + Slot 注入 + 样式注入）、`runtime.js`（apply 时注入 ctx/timer 供各模块读取）、`api.js`（RPC 摊平）、`i18n.js`、`store.js`（store/toast/偏好）、`styles.js`（全部 CSS）、`icons.js`、`lib/`（diff/图谱/rulesYaml 等纯算法）、`hooks/`、`components/`（GitPanelMain、RepoCard 家族含 PushFailModal、DiffDrawer、GitGraphView、各弹窗） |
+| `src/client/` | Client 半体：面板全部 UI（`React.createElement`，无 JSX），模块化拆分——`index.js`（装配层：apply(ctx) + Slot 注入 + 样式注入）、`runtime.js`（apply 时注入 ctx/timer 供各模块读取）、`api.js`（RPC 摊平）、`i18n.js`、`store.js`（store/toast/偏好）、`messageDraft.js`（提交信息草稿：按仓库绝对路径记忆，抵抗卡片卸载重挂）、`styles.js`（全部 CSS）、`icons.js`、`lib/`（diff/图谱/rulesYaml 等纯算法）、`hooks/`、`components/`（GitPanelMain、RepoCard 家族含 PushFailModal、DiffDrawer、GitGraphView、各弹窗） |
 | `src/index.js` | 文件形态 Host 入口（re-export `src/host.js` 默认导出；`./client` 子路径导出 Client 半体） |
 | `scripts/build.mjs` | 构建：生成 `lib/index.js`（对象形态 host 入口 + inject）、`lib/client.js`（esbuild 打包 `src/client/` 为 ModuleLoader bundle，react external） |
 | `scripts/lint-client.mjs` | 构建前守卫：ESLint `no-undef`（内存内 Linter），拦截模块内部漏 import/拼错名 |
-| `scripts/test-write-result.mjs` / `check-client-bundle.mjs` | 行为回归（handleWriteResult 8 场景真值表）与产物冒烟（vm 装载 bundle → apply → 卸载），`npm test` |
-| `scripts/install.mjs` / `uninstall.mjs` | 一键安装/卸载到 web profile（跨平台，不依赖 pnpm） |
+| `scripts/test-write-result.mjs` / `test-message-draft.mjs` / `test-git-lock-retry.mjs` / `check-client-bundle.mjs` | 行为回归（handleWriteResult 8 场景真值表 / 提交信息草稿 7 场景 + RepoCard·GitPanelMain 接线 AST 断言 / git 锁竞争判据+排程 与 host 内联段同步断言，含真机造锁样本）与产物冒烟（vm 装载 bundle → apply → 卸载），`npm test` |
+| `scripts/test-git-lock-e2e.mjs` | 手工核对（不在 `npm test`）：抽出 host.js 真实的 `gitRun`，配忠实实现 `spawnRaw` 契约的桩，让另一个进程真的持 `.git/index.lock` 一段时间——验证生产代码能自愈瞬时锁竞争（而非只是判据正确），且锁不放手时如实失败不吞错 |
+| `scripts/mutate-wiring-check.mjs` | 手工核对的变异测试（不在 `npm test` 链路）：把 RepoCard 里 6 处「草稿存活性接线」逐个改坏，要求接线断言如实变红——断言不会失败的测试等于没有。改写了接线或接线断言后跑一次；改坏后的源码只写进系统临时目录（`GP_WIRING_SRC` 指路），**绝不动真源码** |
+| `scripts/install.mjs` / `uninstall.mjs` | 一键安装/卸载；按 profile 分流：web 走复制式（不依赖 pnpm），desktop 调用桌面应用自带 CLI 走组合包登记（见下节） |
+| `scripts/lib/profile.mjs` | 装机/卸机共享工具：profile 解析（参数 > `DSH_PROFILE`/`DSH_PROFILE_DIR` > 探测）、asar 归档头探测（定位桌面应用安装）、patch 行结构化匹配 |
 | `install.sh` / `uninstall.sh` | bash 包装：`exec node scripts/{install,uninstall}.mjs`（Git Bash / WSL / macOS / Linux） |
 | `cordis.patch.yml` | 组合包补丁层（`- insert:` 插件行，`dsh.bundle.patch` 引用） |
 | `package.json` | 组合包 manifest：`dsh.client`（platform web）+ `dsh.bundle.patch`（见[安装详解](install.md)） |
@@ -79,6 +130,30 @@ Host `subprocess / fs / llm / settings / sandboxPolicy / agentDefaultModel / tim
 connection / webServer`（`fs`/`subprocess`/`connection`/`webServer` 为文件态 inject 硬依赖，
 其余 `ctx.get` 可选读取，缺失时插件降级）；Client `slots / connection / workspaces / locale / timer`
 （`slots`/`connection` 为 bundle inject 硬依赖）；主题走 `--dsw-*` CSS 变量。
+
+### git 执行层：锁竞争重试与 `GIT_OPTIONAL_LOCKS`
+
+`git commit` 抢不到 `.git/index.lock` 时直接 `exit 128` 失败，原文是
+`fatal: Unable to create '…/.git/index.lock': File exists.`（后面还跟着一句容易误导的
+「a git process may have crashed… remove the file manually」）。这个竞争**天然是瞬时的**
+——2026-09-30 实测本仓库面板：07:25:22 第一次「提交并推送」就栽在它上面，07:26:02 原样
+重试即成功（审计日志 `fail:git.commit` → `ok:git.commit`，两次之间**没有任何 git 写操作**）。
+所以 `gitRun` 有两层处理：
+
+- **消掉面板自己这一路**：只读命令（目前是 `repoStatus` 里的 `git status`）带
+  `readOnly: true` → `GIT_OPTIONAL_LOCKS=0`。`git status` 默认会「顺手刷新并写回 index」
+  （纯优化），那就要抢 index.lock；面板每 4s 自动轮询一次 status，正是与提交互撞的来源。
+  关掉它输出完全一样。
+- **兜住外部竞争**：`gitRun` 在退出码 128 且文案含锁文件名 + `File exists` 时重试两次
+  （等 180ms / 500ms，累计 680ms）。判据严格（权限不足、磁盘满同样会带
+  `Unable to create` 但不带 `File exists`，**不重试**）。重试等待必须**异步**——曾用
+  `Atomics.wait` 做同步等待，把宿主事件循环冻住 680ms，同进程的定时器全被推迟、锁的释放
+  反而被自己的等待拖后（端到端测试实测到这一点）。
+
+⚠ 判据与排程在 `src/host.js` 内联了一份、`src/gitRetry.js` 留了一份**参照实现**：
+host.js 刻意保持**零 import**（文件态 npm 包把它原样复制出去单独装载，动态 Cordis 包把它的
+函数体拼进 `code.host`，两种形态下 import 都要断），所以不能 import 那个模块。
+`scripts/test-git-lock-retry.mjs` 会断言两处逐字一致，并断言 host.js 仍然零 import。
 
 ### 陷阱：宿主主题的全局 `corner-shape` 会把圆画成「方圆」
 
@@ -108,7 +183,7 @@ connection / webServer`（`fs`/`subprocess`/`connection`/`webServer` 为文件�
 npm run build             # 构建（内含 no-undef 守卫；原子构建：先写 .build-stage 再整体换上 lib/）
 npm run lint              # 只跑 no-undef 守卫
 npm test                  # pretest 会自动构建 → handleWriteResult 真值表 + 产物冒烟
-node scripts/install.mjs  # 先构建再安装（或 ./install.sh）；是否需重启 dsh web 见下
+node scripts/install.mjs web       # 先构建再安装到命令行版 profile（或 desktop）
 ```
 
 Host 半体源码为「头部注释 + 单个默认导出函数」形态；Client 半体源码为 `src/client/`
@@ -117,11 +192,12 @@ ModuleLoader bundle——对外形态与官方 `dsh-client-ui-*` 插件一致（
 `require("react")` 由宿主模块表解析）。构建期依赖（esbuild/eslint/acorn/react）全部是
 devDependencies，运行时依旧零新增依赖。
 
-**构建后要不要重启 `dsh web`，取决于 profile 的落点是"链接"还是"副本"**：
-`dsh plugin add .` 登记的是 `link:`，落点是指向本仓库的链接 → 构建即生效，浏览器刷新即可；
-复制式安装（`install.sh` / 手动 robocopy）的落点是实体副本 → 每次构建后都要重跑安装脚本，
-否则 DSH 一直读那份旧副本（症状：改了代码"没反应"）。`scripts/install.mjs` 会判定并如实报告，
-检测到「声明 `link:` 但落点是副本」这种自相矛盾状态时**打印修法并拒绝复制**。
+**构建后要不要重启，取决于 profile 的落点是"链接"还是"副本"**：
+`dsh plugin add .` 登记的是 `link:`，落点是指向本仓库的链接 → 构建即生效（web 刷新浏览器、
+桌面版重载窗口即可）；复制式安装（`install.sh` / 手动 robocopy）的落点是实体副本 → 每次构建后
+都要重跑安装脚本，否则 DSH 一直读那份旧副本（症状：改了代码"没反应"）。
+`scripts/install.mjs` 会判定并如实报告，检测到「声明 `link:` 但落点是副本」这种自相矛盾
+状态时**打印修法并拒绝复制**。
 
 ### Client 模块化：为什么不再用单文件闭包
 
