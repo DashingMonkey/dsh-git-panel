@@ -30,7 +30,7 @@
     "build": "node scripts/build.mjs",
     "lint": "node scripts/lint-client.mjs",
     "pretest": "node scripts/build.mjs",
-    "test": "node scripts/test-write-result.mjs && node scripts/test-message-draft.mjs && node scripts/test-git-lock-retry.mjs && node scripts/check-client-bundle.mjs",
+    "test": "node scripts/test-write-result.mjs && node scripts/test-message-draft.mjs && node scripts/test-rules-dirs.mjs && node scripts/test-git-lock-retry.mjs && node scripts/check-client-bundle.mjs",
     "prepare": "npm run build"
   },
   "devDependencies": {

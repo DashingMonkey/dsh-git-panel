@@ -534,11 +534,86 @@ export default function () {
         return homePromise
       }
 
+      // 规则目录：**本 profile 自己的目录**是权威（与 scan-cache / git-repos / logs 同一处，
+      // 见 docs/architecture.md 的「双环境适配」表：数据目录 = <profile>/git-panel/）。
+      // 桌面版走 settings.prepareDocument() → %USERPROFILE%\.dsh\profiles\<profile>\git-panel；
+      // `dsh web` 没有 settings 服务 → %USERPROFILE%\.dsh\git-panel（与 profile 化之前一致）。
+      //
+      // ⚠ 共享目录只按**逐文件**方式参与解析（rulePathCandidates），**不按「哪个目录里有文件」
+      // 选权威目录**：目录列举（fs.listDir）在某些部署/沙箱下会失败，一旦用它做前置判据，
+      // 老规则的回退读取会整条失效（本文件的测试场景 8 就是钉这个的）。
       async function rulesDir() {
+        return await profileRulesDir()
+      }
+
+      async function profileRulesDir() {
         const home = await dshHome()
         if (home) return joinPath(home, 'git-panel', 'rules')
         const root = (sandboxPolicy && sandboxPolicy.workspaceRoot) || '.'
         return joinPath(root, '.git-panel', 'rules')
+      }
+
+      // profile 化之前 dshHome() 一直解析到这里，老用户的规则文件全躺在这个共享目录里
+      //（9/27 加入桌面版支持时没有搬运动作，于是老规则被 profile 目录的自建默认挡在外面）。
+      // 仅作**读取回退与一次性导入来源**，永不在此目录里写新文件。
+      function sharedRulesDir() {
+        const envHome = process.env.USERPROFILE || process.env.HOME
+        return envHome ? joinPath(joinPath(envHome, '.dsh'), 'git-panel', 'rules') : null
+      }
+
+      function baseNameOf(p) {
+        const s = String(p)
+        const i = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'))
+        return i >= 0 ? s.slice(i + 1) : s
+      }
+
+      // 逻辑文件名的两个候选物理路径：本 profile 目录优先，其次共享目录（同一路径时只有一个）。
+      // 只看单个文件在不在（fsReadText），不依赖目录列举。
+      async function rulePathCandidates(logicalPath) {
+        const primary = await rulesDir()
+        const shared = sharedRulesDir()
+        if (!shared || shared === primary) return [logicalPath]
+        return [logicalPath, joinPath(shared, baseNameOf(logicalPath))]
+      }
+
+      function normRuleText(s) { return String(s || '').replace(/\r\n/g, '\n').trim() }
+
+      // 当前生效的全局默认规则原文（两个候选目录按顺序找）。用于判定「仓库专属文件只是
+      // 全局默认的副本」（切来源时 Host 会以当前生效规则为底自动建文件，那份拷贝不含
+      // 任何用户信息，不该遮蔽另一目录里真正被定制过的那份）。
+      async function globalDefaultText() {
+        const logical = await rulesFilePath(null, 'global')
+        for (const cand of await rulePathCandidates(logical)) {
+          const txt = await fsReadText(cand)
+          if (txt !== null) return txt
+        }
+        return null
+      }
+
+      // 仓库专属规则的候选顺序：两个目录都有同名文件，且本 profile 那份与全局默认逐字
+      // 相同、共享那份不同 → 本 profile 那份只是自动生成的副本，让位给共享那份。
+      // 注意：另一份必须真的存在且不同，否则维持原顺序——不能让「还没有仓库专属文件」
+      // 变成本 profile 的全局默认替代品。
+      async function orderRepoRuleCandidates(logicalPath) {
+        const cands = await rulePathCandidates(logicalPath)
+        if (cands.length < 2) return cands
+        const a = await fsReadText(cands[0])
+        const b = await fsReadText(cands[1])
+        if (a === null || b === null) return cands
+        const def = await globalDefaultText()
+        if (def === null) return cands
+        const nd = normRuleText(def)
+        if (normRuleText(a) === nd && normRuleText(b) !== nd) return [cands[1], cands[0]]
+        return cands
+      }
+
+      // 保存目标：与读取顺序一致（种子让位规则同样适用），保证「改哪份就写回哪份」，
+      // 不在另一个目录里留下覆盖它的影子副本。
+      async function resolveRuleSaveTarget(logicalPath) {
+        for (const cand of await orderRepoRuleCandidates(logicalPath)) {
+          if ((await fsReadText(cand)) !== null) return cand
+        }
+        return logicalPath
       }
 
       async function fsReadText(path) {
@@ -731,11 +806,15 @@ export default function () {
       // ============ 规则读写（每次实时读盘，不缓存） ============
       // 仓库专属文件名 {name}-{pathHash8}.yaml：同名仓库（不同路径）各持一份，
       // 也顺带避开保留名 default.yaml；无 path 的 repoName 兜底场景退回旧命名。
+      // ⚠ 兜底命名必须与全局默认文件（default.yaml）**不同名**：无 path 的兜底对象
+      //（resolveRulesRepo 的 { name:'default', path:null }，见 repoName 场景）一旦算出
+      // default.yaml，readRepoRules 就会把全局默认当仓库专属规则读出来（本仓库出现过
+      // 这个伪规则：effective.source 报 'repo' 而内容其实是全局默认）。
       async function rulesFilePath(repo, scope) {
         const dir = await rulesDir()
         if (scope !== 'repo') return joinPath(dir, 'default.yaml')
         const name = sanitizeName(repo && repo.name)
-        const file = repo && repo.path ? name + '-' + pathHash8(normPathKey(repo.path)) + '.yaml' : name + '.yaml'
+        const file = repo && repo.path ? name + '-' + pathHash8(normPathKey(repo.path)) + '.yaml' : name + '-repo.yaml'
         return joinPath(dir, file)
       }
 
@@ -744,21 +823,26 @@ export default function () {
         return joinPath(await rulesDir(), sanitizeName(repo && repo.name) + '.yaml')
       }
 
-      // 读仓库专属规则原文：新哈希文件名优先，缺失时回退旧版文件（老数据无感迁移；
-      // 下次保存写入新路径后即自然脱离旧文件）。path 为实际读到的文件，newPath
-      // 为保存目标路径（供「保存到」提示与 rulesSetScope 创建文件使用）。
+      // 读仓库专属规则原文：新哈希文件名优先，缺失时回退旧版纯名字文件；每个逻辑文件名
+      // 都在「本 profile 目录 → 共享目录」两个候选里按顺序找（老规则文件躺在共享目录，
+      // 见 sharedRulesDir 注释）。path 为实际读到的文件（编辑器据此显示「已加载」），
+      // newPath 为逻辑保存名（供新文件创建与「保存到」提示使用）。
       async function readRepoRules(repo) {
         const newPath = await rulesFilePath(repo, 'repo')
-        let txt = await fsReadText(newPath)
-        let path = newPath
-        if (txt === null && repo && repo.path) {
+        for (const cand of await orderRepoRuleCandidates(newPath)) {
+          const txt = await fsReadText(cand)
+          if (txt !== null) return { txt, path: cand, newPath }
+        }
+        if (repo && repo.path) {
           const legacyPath = await legacyRulesFilePath(repo)
           if (legacyPath !== newPath) {
-            const ltxt = await fsReadText(legacyPath)
-            if (ltxt !== null) { txt = ltxt; path = legacyPath }
+            for (const cand of await rulePathCandidates(legacyPath)) {
+              const ltxt = await fsReadText(cand)
+              if (ltxt !== null) return { txt: ltxt, path: cand, newPath }
+            }
           }
         }
-        return { txt, path, newPath }
+        return { txt: null, path: newPath, newPath }
       }
 
       // 生效来源：显式偏好（git-repos.json 的 ruleScope）优先于文件存在性推断——
@@ -772,13 +856,23 @@ export default function () {
           if (!validateRules(parsed)) return { source: 'repo', path: rr.path, system_prompt: parsed.system_prompt, user_context: parsed.user_context }
         }
         const defPath = await rulesFilePath(repo, 'global')
-        const defTxt = await fsReadText(defPath)
-        if (defTxt !== null) {
+        for (const cand of await rulePathCandidates(defPath)) {
+          const defTxt = await fsReadText(cand)
+          if (defTxt === null) continue
           const parsed = parseRulesYaml(defTxt)
-          if (!validateRules(parsed)) return { source: 'global', path: defPath, system_prompt: parsed.system_prompt, user_context: parsed.user_context }
+          if (!validateRules(parsed)) return { source: 'global', path: cand, system_prompt: parsed.system_prompt, user_context: parsed.user_context }
         }
         const builtin = builtinRules()
         return { source: 'builtin', path: null, system_prompt: builtin.system_prompt, user_context: builtin.user_context }
+      }
+
+      // 是否「未经编辑的内置默认」（pristine）：内容与任一版内置默认（当前版或 LEGACY
+      // 历史版）一致即视为从未编辑过。ensureDefaultRules 与 importLegacyRules 共用。
+      function isBuiltinDefaultText(text, norm) {
+        for (const set of [DEFAULT_RULES, ...LEGACY_DEFAULT_RULES]) {
+          if (norm(text) === norm(emitRulesYaml(set.zh)) || norm(text) === norm(emitRulesYaml(set.en))) return true
+        }
+        return false
       }
 
       // 确保全局默认规则文件存在；仅当其内容仍是未经修改的内置版本（中或英）时，
@@ -788,13 +882,65 @@ export default function () {
         const cur = await fsReadText(defPath)
         const want = emitRulesYaml(builtinRules())
         const norm = (s) => String(s || '').replace(/\r\n/g, '\n').trim()
-        // pristine：内容与任一版内置默认（当前版或 LEGACY 历史版）一致，即视为从未编辑过
-        const builtinYamls = []
-        for (const set of [DEFAULT_RULES, ...LEGACY_DEFAULT_RULES]) { builtinYamls.push(emitRulesYaml(set.zh), emitRulesYaml(set.en)) }
-        const pristine = cur !== null && builtinYamls.some((y) => norm(cur) === norm(y))
+        const pristine = cur !== null && isBuiltinDefaultText(cur, norm)
         if (cur === null || (pristine && norm(cur) !== norm(want))) {
           try { await writeTextAnywhere(defPath, want) } catch (e) { console.error('[git-panel] 创建默认规则失败', e) }
         }
+      }
+
+      // ============ 老规则目录一次性导入（profile 化迁移） ============
+      // profile 化之前 dshHome() 一直指到共享目录，老用户的规则全在那里；桌面版把数据目录
+      // 换到 profile 下之后，老规则从未被搬过来——于是编辑器切「仓库专属规则」看到的只是
+      // 新目录里的默认副本（本次故障的根因）。这里在启动/首次扫描时按「只加不覆盖」补一份：
+      //   - 目标缺失 → 复制；
+      //   - 目标是自动生成物（全局默认：未经编辑的内置默认；仓库专属：与当前全局默认
+      //     逐字相同，即 Host 以当前生效规则为底创建的副本）→ 用老目录那份替换；
+      //   - 目标已被用户编辑过 → 不动。
+      // 共享目录里的原文件**永不删除**（随时可回退旧版本）。
+      let legacyRulesImportedP = null
+      function importLegacyRules() {
+        if (!legacyRulesImportedP) {
+          legacyRulesImportedP = importLegacyRulesOnce().catch((e) => {
+            console.error('[git-panel] 老规则目录导入失败', e)
+            return []
+          })
+        }
+        return legacyRulesImportedP
+      }
+
+      async function importLegacyRulesOnce() {
+        const target = await rulesDir()
+        const shared = sharedRulesDir()
+        if (!shared || shared === target) return [] // web 形态：两者同一目录，没有可导入的来源
+        let entries = []
+        try { entries = await fs.listDir(await fs.resolve(shared)) } catch (e) { return [] }
+        const norm = (s) => String(s || '').replace(/\r\n/g, '\n').trim()
+        const defText = await globalDefaultText()
+        const defNorm = defText === null ? null : norm(defText)
+        const imported = []
+        for (const entry of entries) {
+          if (!entry || entry.type !== 'file') continue
+          const name = entry.name
+          if (!/\.ya?ml$/i.test(name) || /\.bak/i.test(name)) continue
+          const src = joinPath(shared, name)
+          const srcText = await fsReadText(src)
+          if (srcText === null) continue
+          const dstPath = joinPath(target, name)
+          const dstText = await fsReadText(dstPath)
+          let take = false
+          if (dstText === null) take = true // 目标缺失（常见：根本没搬过来）
+          else if (norm(dstText) === norm(srcText)) continue // 内容一致，无需动作
+          else if (name.toLowerCase() === 'default.yaml') take = isBuiltinDefaultText(dstText, norm)
+          else if (defNorm !== null && norm(dstText) === defNorm) take = true
+          if (!take) continue
+          const okW = await writeTextAnywhere(dstPath, srcText)
+          if (okW) imported.push(name)
+        }
+        if (imported.length > 0) {
+          await audit({ op: 'rules-import', from: shared, to: target, files: imported.join(',') })
+          console.log('[git-panel] 已从老规则目录导入 ' + imported.length + ' 个文件: ' + imported.join(', '))
+        }
+        return imported
       }
 
       // ============ 仓库发现（BFS，跳过重目录，上限防失控） ============
@@ -2039,6 +2185,10 @@ export default function () {
             if (valid.length !== hit.repos.length) updateScanCache(hit.root, valid)
             backgroundRescan(root)
             await ensureDefaultRules()
+            // 老规则目录（profile 化之前的位置）一次性补进本 profile：只加不覆盖，
+            // 见 importLegacyRules。放在 ensureDefaultRules 之后——默认文件先建好，
+            // 导入才有「目标是内置默认 → 用老那份替换」的判据。
+            await importLegacyRules()
             return ok({ root: hit.root, count: valid.length, repos: valid, cached: true })
           }
           // 缓存条目整体失效（根目录被移走等）：丢弃该条目，回退全量扫描
@@ -2050,6 +2200,7 @@ export default function () {
         currentRootKey = key
         const res = await scanRepos(root, key)
         await ensureDefaultRules()
+        await importLegacyRules()
         return res
       })
 
@@ -2228,14 +2379,26 @@ export default function () {
       })
 
       // ---- 规则读写 ----
+      // repoRulePath：实际读到的仓库专属文件（可能来自共享目录的老规则文件）；
+      // repoRuleSavePath：保存目标（新文件落本 profile 目录，已有文件就地覆写）。
+      // 两者不同时编辑器会同时显示，避免「改的到底是哪份」说不清。
       registerRpc('rulesGet', async (args) => {
         const repo = resolveRulesRepo(args)
         const defPath = await rulesFilePath(repo, 'global')
         const rr = await readRepoRules(repo)
-        const defYaml = (await fsReadText(defPath)) || emitRulesYaml(builtinRules())
+        let defYaml = null
+        for (const cand of await rulePathCandidates(defPath)) {
+          const txt = await fsReadText(cand)
+          if (txt !== null) { defYaml = txt; break }
+        }
+        defYaml = defYaml || emitRulesYaml(builtinRules())
         const effective = await loadEffectiveRules(repo)
         const ruleScope = await getRuleScopePref(repo)
-        return ok({ defaultYaml: defYaml, defaultPath: defPath, repoYaml: rr.txt, repoPath: rr.newPath, repoRuleExists: rr.txt !== null, ruleScope, effective })
+        const savePath = await resolveRuleSaveTarget(rr.newPath)
+        return ok({
+          defaultYaml: defYaml, defaultPath: defPath, repoYaml: rr.txt, repoPath: rr.newPath,
+          repoRulePath: rr.path, repoRuleSavePath: savePath, repoRuleExists: rr.txt !== null, ruleScope, effective
+        })
       })
 
       registerRpc('rulesSave', async (args) => {
@@ -2245,7 +2408,8 @@ export default function () {
         const parsed = parseRulesYaml(args.yaml)
         const err = validateRules(parsed)
         if (err) return fail(fmt(tr('errRules'), { e: err }))
-        const path = await rulesFilePath(repo, scope)
+        // 保存目标与读取顺序一致：读到共享目录的老文件就写回那份，不产生影子副本
+        const path = await resolveRuleSaveTarget(await rulesFilePath(repo, scope))
         const okW = await writeTextAnywhere(path, emitRulesYaml({ system_prompt: parsed.system_prompt, user_context: parsed.user_context }))
         if (!okW) return fail(fmt(tr('errRulesWrite'), { p: path }))
         // 保存仓库专属规则即视为选择该来源（与旧版「文件存在即生效」的语义一致）
@@ -2261,13 +2425,19 @@ export default function () {
           // 重置仓库专属 = 删除仓库规则文件并显式回退全局（旧版是把内置默认写进
           // 仓库文件，导致全局规则对该仓库永远无法生效）。旧版纯名字文件可能被
           // 同名仓库共享，不动它——ruleScope='global' 已保证它不再被生效逻辑选中。
-          const path = await rulesFilePath(repo, 'repo')
-          await removeFileAnywhere(path)
+          // 两个候选目录都要删：共享目录里那份老规则若不删，重置后读取回退仍会读到它，
+          // 用户会以为重置没生效。
+          const logical = await rulesFilePath(repo, 'repo')
+          const targets = await rulePathCandidates(logical)
+          for (const p of targets) {
+            if ((await fsReadText(p)) === null) continue
+            await removeFileAnywhere(p)
+          }
           await setRuleScopePref(repo, 'global')
-          await audit({ op: 'rules-reset', repo: repo.name, scope, path })
+          await audit({ op: 'rules-reset', repo: repo.name, scope, path: targets.join('|') })
           return ok({ summary: tr('rulesResetRepo') })
         }
-        const path = await rulesFilePath(repo, 'global')
+        const path = await resolveRuleSaveTarget(await rulesFilePath(repo, 'global'))
         const yaml = emitRulesYaml(builtinRules())
         const okW = await writeTextAnywhere(path, yaml)
         if (!okW) return fail(fmt(tr('errRulesWrite'), { p: path }))
@@ -2284,17 +2454,21 @@ export default function () {
           const cur = await readRepoRules(repo)
           if (cur.txt === null) {
             const eff = await loadEffectiveRules(repo)
-            const okW = await writeTextAnywhere(cur.newPath, emitRulesYaml({ system_prompt: eff.system_prompt, user_context: eff.user_context }))
-            if (!okW) return fail(fmt(tr('errRulesWrite'), { p: cur.newPath }))
+            // 新建文件落本 profile 目录（resolveRuleSaveTarget 在两个候选都不存在时返回它）
+            const target = await resolveRuleSaveTarget(cur.newPath)
+            const okW = await writeTextAnywhere(target, emitRulesYaml({ system_prompt: eff.system_prompt, user_context: eff.user_context }))
+            if (!okW) return fail(fmt(tr('errRulesWrite'), { p: target }))
           }
         }
         await setRuleScopePref(repo, scope)
         await audit({ op: 'rules-scope', repo: repo.path, scope })
         const rr = await readRepoRules(repo)
         const effective = await loadEffectiveRules(repo)
+        const savePath = await resolveRuleSaveTarget(rr.newPath)
         return ok({
           summary: tr(scope === 'repo' ? 'rulesScopeRepo' : 'rulesScopeGlobal'),
-          ruleScope: scope, repoYaml: rr.txt, repoPath: rr.newPath, repoRuleExists: rr.txt !== null, effective
+          ruleScope: scope, repoYaml: rr.txt, repoPath: rr.newPath,
+          repoRulePath: rr.path, repoRuleSavePath: savePath, repoRuleExists: rr.txt !== null, effective
         })
       }))
 

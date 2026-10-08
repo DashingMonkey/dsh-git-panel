@@ -381,6 +381,8 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-met
 .gp-rule-scope label { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .gp-rule-scope input { cursor: pointer; margin: 0; flex: none; align-self: center; }
 .gp-rule-scope-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); margin: 0 0 10px; font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 「已加载」那半句：与「保存到」同色系但更弱，避免两段路径抢同一视觉权重 */
+.gp-rule-scope-hint-alt { color: var(--dsw-alias-label-quaternary, var(--dsw-alias-label-tertiary)); }
 .gp-danger { color: var(--dsw-alias-state-error-primary); font-weight: 600; }
 .gp-confirm-summary { margin: 6px 0 10px; font-size: 13.5px; display: flex; align-items: flex-start; gap: 6px; }
 .gp-confirm-input { width: 100%; padding: 8px 9px; font-size: 13.5px; border: 1px solid var(--gp-border-2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }

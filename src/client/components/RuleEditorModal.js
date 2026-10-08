@@ -9,7 +9,9 @@ function RuleEditorModal({ repo, onClose }) {
   // 双缓冲：全局 / 仓库各一套编辑内容；scope 单选即生效来源（切换走 rulesSetScope，
   // 切到仓库时缓冲区以 Host 返回的仓库文件内容为准）
   const [buffers, setBuffers] = React.useState({ global: { sysPrompt: '', userCtx: '' }, repo: { sysPrompt: '', userCtx: '' } })
-  const [paths, setPaths] = React.useState({ global: '', repo: '' })
+  // paths：*Path 是 Host 实际读到的文件（可能来自老规则目录），*SavePath 是保存目标。
+  // 两者不同（读了老目录的老规则文件）时提示行会同时显示，免得「改的到底是哪份」说不清。
+  const [paths, setPaths] = React.useState({ global: '', repo: '', globalSave: '', repoSave: '' })
   const [repoExists, setRepoExists] = React.useState(false)
   // scope 初始为 null：等 rulesGet 返回后跟随当前生效来源（ruleScope 偏好 +
   // 仓库文件存在性，见 Host loadEffectiveRules），加载完成前切换禁用，避免闪跳
@@ -29,7 +31,7 @@ function RuleEditorModal({ repo, onClose }) {
           global: { sysPrompt: g.system_prompt || '', userCtx: g.user_context || '' },
           repo: { sysPrompt: rp.system_prompt || '', userCtx: rp.user_context || '' }
         })
-        setPaths({ global: r.defaultPath || '', repo: r.repoPath || '' })
+        setPaths({ global: r.defaultPath || '', repo: r.repoRulePath || r.repoPath || '', globalSave: r.defaultPath || '', repoSave: r.repoRuleSavePath || r.repoPath || '' })
         setRepoExists(!!r.repoRuleExists)
         setScope(r.effective && r.effective.source === 'repo' ? 'repo' : 'global')
         setLoaded(true)
@@ -40,6 +42,11 @@ function RuleEditorModal({ repo, onClose }) {
 
   const curScope = scope || 'global'
   const buf = buffers[curScope]
+  // 提示行读的两个路径：savePath = 保存目标（新文件落本 profile 规则目录，已有文件就地
+  // 覆写）；loadedFrom = 实际读到的文件（仓库专属可能来自老规则目录）。全局 scope 两者
+  // 恒等（default.yaml 只有一份路径语义）。
+  const savePath = curScope === 'repo' ? (paths.repoSave || paths.repo) : (paths.globalSave || paths.global)
+  const loadedFrom = curScope === 'repo' ? paths.repo : paths.global
   const patchBuf = (p) => setBuffers((b) => ({ ...b, [curScope]: { ...b[curScope], ...p } }))
 
   const previewUser = (buf.userCtx || tr('missingUserCtx'))
@@ -86,7 +93,7 @@ function RuleEditorModal({ repo, onClose }) {
           global: { sysPrompt: g.system_prompt || '', userCtx: g.user_context || '' },
           repo: { sysPrompt: rp.system_prompt || '', userCtx: rp.user_context || '' }
         })
-        setPaths({ global: rg.defaultPath || '', repo: rg.repoPath || '' })
+        setPaths({ global: rg.defaultPath || '', repo: rg.repoRulePath || rg.repoPath || '', globalSave: rg.defaultPath || '', repoSave: rg.repoRuleSavePath || rg.repoPath || '' })
         setRepoExists(!!rg.repoRuleExists)
       }
       setScope(next)
@@ -109,7 +116,7 @@ function RuleEditorModal({ repo, onClose }) {
           const rp = parseRulesYaml(r.repoYaml)
           setBuffers((b) => ({ ...b, repo: { sysPrompt: rp.system_prompt || '', userCtx: rp.user_context || '' } }))
         }
-        if (r.repoPath) setPaths((p) => ({ ...p, repo: r.repoPath }))
+        if (r.repoRulePath || r.repoPath) setPaths((p) => ({ ...p, repo: r.repoRulePath || r.repoPath, repoSave: r.repoRuleSavePath || r.repoPath }))
         setRepoExists(!!r.repoRuleExists)
         setScope(next)
         pushToast('success', r.summary || tr('saved'))
@@ -134,9 +141,13 @@ function RuleEditorModal({ repo, onClose }) {
         React.createElement('input', { type: 'radio', name: 'gp-rule-scope', disabled: !loaded || switching, checked: curScope === 'repo', onChange: () => onScopeChange('repo') }),
         React.createElement('span', null, tr('repoRules'))),
       switching ? React.createElement('span', { className: 'gp-spinner' }) : null),
-    React.createElement('div', { className: 'gp-rule-scope-hint', title: paths[curScope] },
-      fmt(tr('scopeSaveTo'), { p: paths[curScope] || tr('loading') }),
-      curScope === 'repo' && !repoExists ? tr('scopeNewFile') : null),
+    React.createElement('div', { className: 'gp-rule-scope-hint', title: curScope === 'repo' ? paths.repo : paths.global },
+      fmt(tr('scopeSaveTo'), { p: savePath || tr('loading') }),
+      curScope === 'repo' && !repoExists ? tr('scopeNewFile') : null,
+      curScope === 'repo' && loadedFrom && savePath && loadedFrom !== savePath
+        ? React.createElement('span', { className: 'gp-rule-scope-hint-alt' },
+            ' ' + fmt(tr('scopeLoadedFrom'), { p: loadedFrom }) + tr('scopeCrossDir'))
+        : null),
     React.createElement('div', { className: 'gp-rule-cols' },
       React.createElement('div', { className: 'gp-rule-col' },
         React.createElement('div', { className: 'gp-rule-col-title' }, tr('rulesContent')),

@@ -64,8 +64,34 @@ profile 与安装路径，因此代码层面零分叉——两者的差异全部
 | 插件面 | `dsh.client.platform: "web"` + `dsh.bundle.patch` | 同上（DSH 只认 `"web"` 这一个 platform 值，非 web 声明会被静默忽略） |
 | 可用服务 | `fs`/`subprocess`/`connection`/`webServer` | 同名服务齐备（`webServer.register({kind:'prefix'})`、`connection.requestRejection` 实测在 0.2.0-rc.2 一致） |
 | 数据目录 | `<profile>/git-panel/`（规则/缓存/审计） | 同左，但**位于 desktop profile 下**，与 web 那份互不相通 |
+| 规则目录迁移 | 无（`dshHome()` 一直指向 `$DSH_HOME/git-panel/rules`） | profile 化之前的老规则都在 `$DSH_HOME/git-panel/rules`（即 web 版那一份）；首次 `scan` 时按「只加不覆盖」导入本 profile（见下） |
 | 安装方式 | 复制式（写 `node_modules` + patch 行） | 组合包式（应用自带 CLI 登记 `link:` 依赖 + `dsh.profile.bundles`） |
 | 生效方式 | 重启 `dsh web`（链接落点则刷新即可） | 完全退出应用后重新打开 |
+
+### 规则目录的 profile 化与老规则导入
+
+数据目录跟着 profile 走是官方语义（上表），提交规则因此也落在 `<profile>/git-panel/rules/`。
+但**加入桌面版支持之前**（2026-09-27 之前）`dshHome()` 一直解析到 `$DSH_HOME/git-panel`，
+用户的规则文件全在那个共享目录里，而 profile 化当时没有任何搬运动作——于是桌面版打开编辑器
+时，「仓库专属规则」读到的是本 profile 新建的默认副本，看着就像「没加载到对应文件」。
+
+现在的处理是**读回退 + 一次性导入**，两边都按逐文件判断，不拿目录列举结果选权威目录：
+
+- `rulePathCandidates(logicalPath)`：同一逻辑文件名在本 profile 目录与共享目录各查一次
+  （本 profile 优先）。只看单个文件在不在（`fsReadText`），**不依赖 `fs.listDir`**——
+  目录列举在部分部署/沙箱下会失败，用它做前置判据会让整条回退一起失效。
+- `importLegacyRules()`（首次 `scan` 时跑一次）：把共享目录里本 profile 缺失的 `*.yaml`
+  复制过来；已存在时只在**目标是自动生成物**时才替换——`default.yaml` 看它是不是未经编辑的
+  内置默认，仓库专属文件看它是不是与当前全局默认逐字相同（切来源时 Host 以当前生效规则为底
+  建的那份副本）。用户编辑过的文件一律不动，共享目录里的原文件**永不删除**（随时可回退旧版本）。
+- 种子让位：本 profile 那份与全局默认逐字相同、共享那份不同时，读取顺序把共享那份提前
+  （否则自动生成的副本会挡在真正被定制过的那份前面）；保存目标跟随同一顺序，保证
+  「改哪份就写回哪份」，不在另一个目录留下覆盖它的影子副本。
+- 仓库专属「重置」把两个候选目录里的文件都删掉——只删本 profile 那份的话，读取回退还会
+  把老目录那份读回来，用户会以为重置没生效。
+
+`npm test` 里的 `scripts/test-rules-dirs.mjs` 用临时目录把 8 个场景（导入、内置默认占位
+替换、种子让位、双份定制、保存、重置、web 形态、共享目录列举失败）全部钉住。
 
 ### 为什么桌面版不能走复制式
 
