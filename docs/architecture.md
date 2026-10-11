@@ -203,6 +203,22 @@ host.js 刻意保持**零 import**（文件态 npm 包把它原样复制出去�
 当前三处：`.gp-spinner`、`.gp-layout-radio`、`.gp-layout-radio::after`。其余圆角
 （卡片/按钮/pill）沿用宿主设计语言，**不要**整体覆盖成 round。
 
+### 陷阱：inline-flex 的基线取自「第一个子项」，会把同行文字错开
+
+提交区右侧那一行是「⟳ 生成中 12s · 已暂存 N 个文件」四段拼出来的。原先 `.gp-staged-hint`
+只是个普通 `span`（默认基线对齐），里面的 `.gp-gen-progress` 是 `inline-flex`，于是
+**整条进度指示的基线 = 它第一个 flex 子项的基线 = `.gp-spinner`（无内容的 inline-block，
+基线是自己的下边框）**。结果「转圈的底边」被按到文本基线上，进度文字被整体抬高
+3.5px（headless Chrome 实测行盒中心：进度 124.5 / 已暂存 128），肉眼就是两者不在一条
+中线上——数字对不上时很容易误判成字体或字号问题。
+
+约定：**同行混合「图标 + 文字 + 计数」时，容器自己写成 flex 行 + `align-items:center`**，
+让每个片段各自作为 flex 子项居中，不要依赖基线对齐（`inline-flex`/`inline-block` 内含
+无文字子项时基线都是「盒子的底边」，一定会错位）。分隔点「·」这类标点也独立成一个子项，
+两侧间距统一交给容器的 `flex gap`——塞进带 `gap` 的子元素里会出现「一侧 gap+空格、
+另一侧半格」的不等宽间距。当前实现：`.gp-staged-hint`（flex + center + gap 4px）+
+`.gp-gen-progress` / `.gp-gen-sep`，见 `src/client/styles.js`。
+
 ## 本地开发
 
 ```sh

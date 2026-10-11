@@ -395,9 +395,13 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
         // 曾经这一格就是「⟳ 生成中…」按钮，换成停止按钮后动效丢了，必须显式补上。
         // generatingNow 只在 host 确认 done===false 时为真：点了停止之后指示器立刻消失，
         // 不会出现「已经不跑了还在转」。提交区顶边另有一条扫光，见 .gp-commit-area.gp-generating。
+        // 「·」是 .gp-gen-progress 的**兄弟节点**而不是塞在它里面：进度指示自己是 inline-flex
+        // （内部 gap 5px），塞进去会变成「17s」左侧 gap + 空格、「·」右侧只剩半格，两侧不等宽；
+        // 放外面则两侧间距都归 .gp-staged-hint 的 flex gap 管（见 styles.js 的说明）。
         generatingNow
-          ? React.createElement('span', { className: 'gp-gen-progress' }, React.createElement('span', { className: 'gp-spinner' }), genProgress, ' · ')
+          ? React.createElement('span', { className: 'gp-gen-progress' }, React.createElement('span', { className: 'gp-spinner' }), genProgress)
           : null,
+        generatingNow ? React.createElement('span', { className: 'gp-gen-sep' }, '·') : null,
         stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : tr('noStaged'))),
     React.createElement('div', { className: 'gp-commit-actions' },
       React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: () => doCommit(false), disabled: !canCommit, title: conflictedCount > 0 ? fmt(tr('titleResolveFirst'), { n: conflictedCount }) : otherOp ? fmt(tr('titleOtherOp'), { op: otherOp }) : stagedPaths.length === 0 ? tr('titleStageFirst') : fmt(tr('commitTitle'), { n: stagedPaths.length }) },

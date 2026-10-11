@@ -200,14 +200,28 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
 .gp-left-group { display: flex; gap: 6px; align-items: center; }
 .gp-commit-actions { display: flex; gap: 6px; margin-top: 8px; }
 .gp-commit-actions .gp-btn { flex: 1; padding: 6px 12px; font-weight: 600; }
-.gp-staged-hint { font-size: 12px; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
+/* 右侧提示行：生成中的存活指示（转圈 + 「生成中 12s」）与「已暂存 N 个文件」并排同一行。
+   这里**必须**自己是一条 flex 行 + align-items:center，不能靠默认的基线对齐——
+   .gp-gen-progress 是 inline-flex，而 inline-flex 的基线取自**第一个 flex 子项**：
+   它恰好是 .gp-spinner（无内容的 inline-block，基线 = 自己的下边框），于是整条进度指示
+   拿「转圈的底边」当基线去和「已暂存」的文本基线对齐，进度文字被整体抬高 3.5px
+   （实测行盒中心：进度 124.5 / 已暂存 128），两个片段肉眼可见不在一条中线上。
+   改 flex 后转圈、进度文字、分隔点、计数共用同一视觉中心（实测四者中心完全一致）。
+   gap 同时接管「·」两侧的间距；只有「已暂存 N 个文件」一个子项时 gap 不生效，
+   不会凭空多出空白。 */
+.gp-staged-hint { font-size: 12px; color: var(--dsw-alias-label-secondary); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
 /* 终止生成：占位切换（生成中把「生成」换成它），固定最小宽度让两个状态的按钮等宽，
    右侧 .gp-staged-hint 不会随之左右抖动 */
 .gp-stop-btn { min-width: 84px; }
 /* 生成进行中的存活指示：转圈 + 「生成中 12s」。
    转圈复用 .gp-spinner，和原先「⟳ 生成中…」按钮是同一个视觉语言；
-   秒数靠已有的轮询（120ms）刷新，不需要额外定时器 */
+   秒数靠已有的轮询（120ms）刷新，不需要额外定时器。
+   元素内只有「转圈 + 进度文字」两段；后面的分隔点见 .gp-gen-sep */
 .gp-gen-progress { font-size: 11.5px; color: var(--dsw-alias-brand-primary); white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+/* 存活指示与「已暂存 N 个文件」之间的间隔点：独立成项，两侧间距统一由 .gp-staged-hint
+   的 flex gap 给。塞进 .gp-gen-progress 会让左侧变成 gap + 空格、右侧只剩半格，两侧不等宽。
+   颜色取三级文本色：它是标点，不是信息本身 */
+.gp-gen-sep { color: var(--dsw-alias-label-tertiary); }
 .gp-history-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; cursor: pointer; user-select: none; border-top: 1px solid var(--gp-border-1); font-size: 13px; color: var(--dsw-alias-label-secondary); }
 .gp-history-head:hover { color: var(--dsw-alias-label-primary); }
 .gp-history-body { display: flex; padding: 6px 8px 10px; border-top: 1px solid var(--gp-border-1); height: 470px; }
