@@ -209,7 +209,7 @@ const insertBlock = `# @dsh-local/git-panel - installed by scripts/install.mjs
     - id: ${ENTRY_ID}
       name: '${PKG_NAME}'
       config:
-        scanMaxDepth: 10
+        scanMaxDepth: 1
         scanMaxDirs: 2000
         scanMaxRepos: 50
 `

@@ -51,7 +51,11 @@ export default function () {
       // 点前缀目录（.git/.svn/.idea/.venv 等）统一由扫描处的 startsWith('.') 规则跳过，这里只列常规重目录
       const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'target', 'coverage', 'vendor', 'venv', '__pycache__', 'bin', 'obj'])
 
-      // 扫描上限：文件形态下由组合行 config（cordis.patch.yml 的 insert 行 / dsh plugin 的注册行）覆盖；动态包形态无 config，用默认值
+      // 扫描上限：文件形态下由组合行 config（cordis.patch.yml 的 insert 行 / dsh plugin 的注册行）覆盖；动态包形态无 config，用默认值。
+      // 深度默认 1（根目录 + 直接子目录），对齐 VS Code 内置 git 扩展 git.repositoryScanMaxDepth
+      // 的默认值：更深的扫描会把上游克隆（如 work/upstream/ 下整仓 checkout 的三个独立
+      // .git）与主项目并列展示，看起来就像一个目录冒出多个项目。需要多仓嵌套的工作区
+      // 用 config 把 scanMaxDepth 调大（1~64）即可。
       function scanLimit(value, fallback, min, max) {
         const n = Math.floor(Number(value))
         if (!isFinite(n) || n <= 0) return fallback
@@ -59,7 +63,7 @@ export default function () {
       }
       cfg = cfg && typeof cfg === 'object' ? cfg : {}
       const SCAN = {
-        maxDepth: scanLimit(cfg.scanMaxDepth, 10, 1, 64),
+        maxDepth: scanLimit(cfg.scanMaxDepth, 1, 1, 64),
         maxDirs: scanLimit(cfg.scanMaxDirs, 2000, 1, 200000),
         maxRepos: scanLimit(cfg.scanMaxRepos, 50, 1, 2000)
       }
@@ -1016,7 +1020,9 @@ export default function () {
         return home ? joinPath(home, 'git-panel', 'scan-cache.json') : null
       }
 
-      // 磁盘缓存只在首次 scan 时读取一次；损坏 JSON / 过期 / 结构不符的条目静默丢弃
+      // 磁盘缓存只在首次 scan 时读取一次；损坏 JSON / 版本不符 / 过期 / 结构不符的条目静默丢弃。
+      // version 2 = 默认扫描深度降为 1（对齐 VS Code）后的格式：旧条目的仓库列表是深度 10
+      // 时代的扫描结果，直接复用会让已被深度屏蔽的嵌套仓库继续显示到 7 天 TTL 过期，必须整体作废。
       function loadScanCache() {
         if (scanCacheLoadPromise) return scanCacheLoadPromise
         scanCacheLoadPromise = (async () => {
@@ -1026,6 +1032,7 @@ export default function () {
           if (!raw) return
           let data = null
           try { data = JSON.parse(raw) } catch (e) { return }
+          if (!data || data.version !== 2) return
           const entries = data && Array.isArray(data.entries) ? data.entries : []
           const now = Date.now()
           for (const e of entries) {
@@ -1052,7 +1059,7 @@ export default function () {
           const entries = Array.from(scanCache.values())
             .sort((a, b) => b.scannedAt - a.scannedAt)
             .slice(0, SCAN_CACHE_MAX_ROOTS)
-          const okW = await writeTextAnywhere(p, JSON.stringify({ version: 1, entries }, null, 2) + '\n')
+          const okW = await writeTextAnywhere(p, JSON.stringify({ version: 2, entries }, null, 2) + '\n')
           if (!okW) console.error('[git-panel] 扫描缓存写盘失败: ' + p)
         }).catch(() => {})
         return scanCacheWriteChain

@@ -7,11 +7,13 @@
 #   - 或声明 dsh.bundle 后经 `dsh plugin --profile web add <路径|tgz>` 安装
 #
 # config 仅在文件态（loader）装载时生效（apply(ctx, config) 第二参）；
-# 动态 Cordis 包形态无 config，扫描上限用内置默认值（深度 10 / 2000 目录 / 50 仓库）。
+# 动态 Cordis 包形态无 config，扫描上限用内置默认值（深度 1 / 2000 目录 / 50 仓库）。
+# 深度默认 1 对齐 VS Code 内置 git 扩展的 git.repositoryScanMaxDepth 默认值——只认根目录
+# 与直接子目录；多仓嵌套的工作区（仓库放在二层及更深）把 scanMaxDepth 调大（1~64）。
 - insert:
     - id: git-panel
       name: '@dsh-local/git-panel'
       config:
-        scanMaxDepth: 10
+        scanMaxDepth: 1
         scanMaxDirs: 2000
         scanMaxRepos: 50

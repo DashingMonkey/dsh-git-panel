@@ -19,8 +19,11 @@
 - 扫描根默认跟随当前工作空间路径（面板主动携带 root 调用，Host 不再回退
   `sandboxPolicy.workspaceRoot`——在 dsh web 部署里那可能是无意义的进程启动目录）；
   BFS 递归发现嵌套 Git 仓库（含 worktree 的 `.git` 文件形态）；跳过 `node_modules`/
-  `dist`/`build` 等重目录；上限：深度 10 / 2000 目录 / 50 仓库（文件形态下可经组合行
-  config 的 `scanMaxDepth`/`scanMaxDirs`/`scanMaxRepos` 覆盖，见[安装详解](install.md)）。
+  `dist`/`build` 等重目录；上限：深度 1 / 2000 目录 / 50 仓库。深度默认 1（只扫根目录
+  与直接子目录）对齐 VS Code 内置 git 扩展 `git.repositoryScanMaxDepth` 的默认值——
+  深层嵌套的上游克隆（如 `work/upstream/` 下整仓 checkout）不会被并列当成项目；
+  多仓嵌套的工作区可经组合行 config 的 `scanMaxDepth` 调深（`scanMaxDirs`/
+  `scanMaxRepos` 同理，见[安装详解](install.md)）。
 - **扫描结果两级缓存**：扫描结果按根目录缓存在内存中，并持久化到
   `$DSH_HOME/git-panel/scan-cache.json`（上限 50 个根、7 天过期）。切换项目再切回、
   或重启 dsh web 后首次打开，直接秒回缓存列表；命中时会并行校验每个仓库的 `.git`

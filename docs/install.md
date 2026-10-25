@@ -126,7 +126,7 @@ npx @deepseek-ai/dsh plugin --profile web add ./dsh-local-git-panel-1.0.0.tgz
        - id: git-panel
          name: '@dsh-local/git-panel'
          config:
-           scanMaxDepth: 10
+           scanMaxDepth: 1
            scanMaxDirs: 2000
            scanMaxRepos: 50
    ```
@@ -159,8 +159,11 @@ npx @deepseek-ai/dsh plugin --profile web add ./dsh-local-git-panel-1.0.0.tgz
 4. 重新打开桌面应用。侧栏底部出现 Git Panel 按钮。
 
 > **注意 1**：`cordis.patch.yml` 的 `scanMaxDepth` / `scanMaxDirs` / `scanMaxRepos`
-> 经 `apply(ctx, config)` 第二参传入，默认深度 10 / 2000 目录 / 50 仓库。桌面版走组合包登记，
-> 这一层的 config 由包内 `cordis.patch.yml` 提供（同样是 10 / 2000 / 50）。
+> 经 `apply(ctx, config)` 第二参传入，默认深度 1 / 2000 目录 / 50 仓库。深度 1（只扫
+> 根目录与直接子目录）对齐 VS Code 内置 git 扩展 `git.repositoryScanMaxDepth` 的默认值，
+> 深层嵌套的上游克隆不会被并列展示；仓库放在二层及更深的工作区把 `scanMaxDepth` 调大
+> （取值 1~64）。桌面版走组合包登记，这一层的 config 由包内 `cordis.patch.yml` 提供
+> （同样是 1 / 2000 / 50）。
 >
 > **注意 2**：文件态装载依赖 `inject` 等待 `fs`/`subprocess`/`connection`/`webServer` 就绪；
 > 不要移除 `lib/index.js` 的 `inject` 声明（否则 loader 可能在服务就绪前执行 apply，
