@@ -24,7 +24,13 @@ export const PANEL_CSS = `
    标记与变量（var 回退 0px），因此本组规则在浏览器里**完全无副作用**。
    不加这组规则时，满高的 fixed 覆盖层（面板/竖条/diff 抽屉与遮罩）会盖住标题栏的
    拖动区与窗口控制按钮，桌面版下会挡操作。all:initial 之类整体重置不可取——
-   只逐项改 top，其余几何（left/right/bottom/width、滚动、z-index）保持原样。 */
+   只逐项改 top，其余几何（left/right/bottom/width、滚动、z-index）保持原样。
+   ↓ 避让之后又冒出一个新问题：三块覆盖层的顶边（.gp-header / .gp-rail /
+   .gp-diff-head）与标题栏同用 --dsw-specific-sidebar-fill，同一片底色上下相接，
+   肉眼分不出「面板顶」与「窗口标题栏下沿」在哪（桌面版实测整块连成一片灰）。
+   故在这三处顶边各补一条 1px 结构线，取值同面板内其他结构分隔（--gp-border-1）——
+   标题栏下沿因此多出一道可见分界。Web 版面板贴视口顶（top:0），这条线落在屏幕
+   最上沿，不改变观感。 */
 html[data-windows-titlebar] .gp-panel, html[data-platform="darwin"] .gp-panel,
 html[data-windows-titlebar] .gp-rail, html[data-platform="darwin"] .gp-rail,
 html[data-windows-titlebar] .gp-diff-backdrop, html[data-platform="darwin"] .gp-diff-backdrop,
@@ -62,14 +68,14 @@ body[data-ds-dark-theme] { --gp-pop-bg: color-mix(in srgb, var(--dsw-alias-bg-ov
 .gp-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; transform: translateX(-50%); background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .15s; }
 .gp-resize:hover::after { opacity: .35; }
 .gp-resize-active::after, .gp-resize-active:hover::after { opacity: .6; }
-.gp-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--gp-border-1); background: var(--dsw-specific-sidebar-fill); flex: 0 0 auto; }
+.gp-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--gp-border-1); border-bottom: 1px solid var(--gp-border-1); background: var(--dsw-specific-sidebar-fill); flex: 0 0 auto; }
 .gp-title { font-weight: 600; font-size: 14px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
 /* 标题（logo + 文字）整体是可点按钮：点击折叠到侧栏。负 margin 抵消内边距，保持原排版不变。
    悬停不做任何高亮/阴影（保持标题栏静态观感），仅保留 pointer 手型提示可点；也不挂 title 气泡。 */
 .gp-title-btn { border: none; background: transparent; color: inherit; font-family: inherit; padding: 2px 6px; margin: -2px -6px; border-radius: 5px; cursor: pointer; }
 /* 折叠态：右侧 44px 竖条，整条可点击展开；只露 logo 图标 + 竖排文字；
    折叠/展开时与面板交叉滑入/滑出（translateX 纯位移，类 diff 抽屉动效） */
-.gp-rail { position: fixed; top: 0; right: 0; bottom: 0; width: 44px; box-sizing: border-box; background: var(--dsw-specific-sidebar-fill); border: none; border-left: 1px solid var(--gp-border-1); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 11px 0; cursor: pointer; z-index: 60; color: var(--dsw-alias-label-primary); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; box-shadow: -6px 0 16px rgba(0,0,0,.10); transition: transform .22s cubic-bezier(.2,.8,.2,1); }
+.gp-rail { position: fixed; top: 0; right: 0; bottom: 0; width: 44px; box-sizing: border-box; background: var(--dsw-specific-sidebar-fill); border: none; border-top: 1px solid var(--gp-border-1); border-left: 1px solid var(--gp-border-1); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 11px 0; cursor: pointer; z-index: 60; color: var(--dsw-alias-label-primary); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; box-shadow: -6px 0 16px rgba(0,0,0,.10); transition: transform .22s cubic-bezier(.2,.8,.2,1); }
 .gp-rail:hover { background: var(--dsw-alias-bg-layer-2); }
 .gp-rail-label { writing-mode: vertical-rl; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: var(--dsw-alias-label-secondary); user-select: none; }
 .gp-rail:hover .gp-rail-label { color: var(--dsw-alias-label-primary); }
@@ -298,7 +304,7 @@ body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(
 .gp-diff-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; transform: translateX(-50%); background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .15s; }
 .gp-diff-resize:hover::after { opacity: .35; }
 .gp-diff-resize-active::after, .gp-diff-resize-active:hover::after { opacity: .6; }
-.gp-diff-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--gp-border-1); background: var(--dsw-specific-sidebar-fill); flex: 0 0 auto; }
+.gp-diff-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--gp-border-1); border-bottom: 1px solid var(--gp-border-1); background: var(--dsw-specific-sidebar-fill); flex: 0 0 auto; }
 .gp-diff-glyph { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; font-family: 'Cascadia Mono', Consolas, monospace; }
 .gp-diff-glyph.gp-g-added { color: var(--dsw-alias-state-success-primary); background: rgba(46,160,67,.16); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent); }
 .gp-diff-glyph.gp-g-modified { color: var(--dsw-alias-state-warn-primary); background: rgba(215,166,72,.16); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); }
