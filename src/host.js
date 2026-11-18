@@ -217,7 +217,8 @@ export default function () {
           // Client 靠它把「主动终止」与「真失败」分开，绝不能弹成生成失败。
           errGenStopped: '[gen-stopped] 已终止生成',
           errGenModelInvalid: '模型配置无效（缺少 provider 或 model）', errNoRulesHome: '无法定位规则/配置目录',
-          errTimeout: '进程执行超时（{ms}ms）: {c}', noCommits: '无提交', errGenerateNoFiles: '请先暂存文件（生成基于 staged diff）',
+          errTimeout: '进程执行超时（{ms}ms）: {c}', noCommits: '无提交', errGenerateNoFiles: '参数无效：files 应为文件路径数组（暂存区为空时传空数组 = 按全部未暂存改动生成）',
+          errGenerateNoChanges: '没有可生成的变更：暂存区与未暂存改动均为空', genNoStagedNote: '（暂存区为空，以下为工作区全部未暂存的改动，含未跟踪的新文件内容）',
           errBinary: '无法读取文件内容（可能为二进制）', conflictNoContent: '冲突文件在工作区不存在（删除类冲突或二进制文件）',
           errNoYaml: '缺少 yaml', errRules: '规则校验失败: {e}', errNoSys: '缺少 system_prompt 字段', errNoUser: '缺少 user_context 字段',
           errRulesWrite: '写入失败: {p}',
@@ -271,7 +272,8 @@ export default function () {
           // Marker prefix gen-stopped: lets the client tell a user abort apart from a real failure.
           errGenStopped: '[gen-stopped] generation stopped',
           errGenModelInvalid: 'Invalid model configuration (missing provider or model)', errNoRulesHome: 'Cannot locate rules/config directory',
-          errTimeout: 'Process execution timed out ({ms}ms): {c}', noCommits: 'no commits', errGenerateNoFiles: 'Stage files first (generation is based on the staged diff)',
+          errTimeout: 'Process execution timed out ({ms}ms): {c}', noCommits: 'no commits', errGenerateNoFiles: 'Invalid argument: files must be an array of paths (an empty array means generate from all unstaged changes)',
+          errGenerateNoChanges: 'Nothing to generate from: no staged or unstaged changes', genNoStagedNote: '(nothing staged; below are all unstaged worktree changes, including untracked new files)',
           errBinary: 'Cannot read file content (may be binary)', conflictNoContent: 'Conflict file is absent from the worktree (delete/delete conflict or binary file)',
           errNoYaml: 'Missing yaml', errRules: 'Rules validation failed: {e}', errNoSys: 'Missing system_prompt field', errNoUser: 'Missing user_context field',
           errRulesWrite: 'Write failed: {p}',
@@ -1500,13 +1502,34 @@ export default function () {
 
       // task 由调用方（generate RPC）在**准备 diff 之前**就建好并放进 genTasks，
       // 这样「读 diff 的那几百毫秒~数秒」也处在可终止状态（多文件仓库尤其明显）。
+      //
+      // 生成目标的两条口径：
+      //   - files 非空 = Client 显式给出（通常就是 staged 路径，「暂存即选择」），逐个校验必须
+      //     属于变更集，再按各文件所在组取对应 diff；
+      //   - files 为空 = 「按全部改动生成」——Client 仅在暂存区为空时才发空数组。此时不校验任何
+      //     外部路径，目标直接取自服务端 status 的 staged → unstaged → untracked 三组，
+      //     手工构造的 RPC 也注入不了变更集外的路径。三组都为空才没有可生成的对象。
       async function prepareGenerate(task, repo, files) {
         const rules = await loadEffectiveRules(repo)
-        const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
-        if (!chk.ok) return chk
-        const status = chk.status
+        let status
+        if (files && files.length > 0) {
+          const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
+          if (!chk.ok) return chk
+          status = chk.status
+        } else {
+          const st = await repoStatus(repo)
+          if (!st.ok) return st
+          status = st
+        }
         const untrackedSet = new Set(status.untracked.map((f) => f.path))
         const stagedSet = new Set(status.staged.map((f) => f.path))
+        let targets = files
+        if (!targets || targets.length === 0) {
+          const all = []
+          for (const g of ['staged', 'unstaged', 'untracked']) for (const f of status[g]) all.push(f.path)
+          if (all.length === 0) return fail(tr('errGenerateNoChanges'))
+          targets = all
+        }
         // 生成上下文预算：120KB（约 40K tokens）足够覆盖常见多文件改动；
         // 单文件 git diff 的 stdout 上限 64KB（超出会自动 spill 后读全，非硬截断）。
         const DIFF_TOTAL_BUDGET = 120 * 1024
@@ -1514,12 +1537,12 @@ export default function () {
         const parts = []
         let total = 0
         let truncatedAny = false
-        for (const f of files) {
+        for (const f of targets) {
           // 逐文件检查终止标志：git diff 是串行的，不检查则 N 个文件都要跑完才停得下来
           if (task.aborted) return fail(tr('errGenStopped'))
           if (total >= DIFF_TOTAL_BUDGET) { truncatedAny = true; break }
           let text
-          if (untrackedSet.has(f)) text = '# 新文件（未跟踪）: ' + f
+          if (untrackedSet.has(f)) text = await untrackedGenText(repo, f)
           else {
             const r = await gitRun(repo.path, stagedSet.has(f) ? ['diff', '--staged', '--', f] : ['diff', '--', f], { maxBytes: DIFF_FILE_MAX, timeoutMs: 60000 })
             text = (r.text || '').trim() || '# 无差异: ' + f
@@ -1539,6 +1562,9 @@ export default function () {
           parts.push(text)
         }
         if (truncatedAny) parts.push('# ……（diff 过长，部分内容已截断）')
+        // 没有任何暂存成分时显式告知模型：上下文里的 diff 不是 staged diff，免得它按
+        // 「已暂存」的假设去描述提交范围
+        if (stagedSet.size === 0) parts.unshift(tr('genNoStagedNote'))
         const sel = await modelSelection()
         if (!sel) return fail(tr('errNoLlm'))
         // modelSelection 里有 listModels 的网络调用，回来后再确认一次用户没在这期间点了停止
@@ -1546,9 +1572,54 @@ export default function () {
         const userCtx = (rules.user_context || '')
           .replaceAll('{repo_name}', repo.name)
           .replaceAll('{branch}', status.branch || '(未知)')
-          .replaceAll('{file_list}', files.map((f) => '- ' + f).join('\n'))
+          .replaceAll('{file_list}', targets.map((f) => '- ' + f).join('\n'))
           .replaceAll('{staged_diff}', parts.join('\n'))
         return ok({ sel, rules, userCtx })
+      }
+
+      // 未跟踪文件的生成上下文：与 fileDiff 的 untracked 分支同一形态——读取内容、合成
+      // 「整份新增」的 unified diff。没有它，无暂存场景下模型只能看到新文件的文件名，对新增
+      // 代码无从描述；有了它，未暂存的新文件也能生成像样的提交信息。二进制 / 目录 / 读取失败
+      // 退回只给名称标记（与旧行为一致的那半）。单文件行数上限让一个大新文件不至于独占整个
+      // 预算，总预算仍由 prepareGenerate 的 120KB 机制兜底。
+      const GEN_UNTRACKED_LINE_CAP = 2000
+      async function untrackedGenText(repo, f) {
+        const fullPath = joinPath(repo.path, f)
+        let target = null
+        try { target = await fs.resolve(fullPath) } catch (e) { /* ignore */ }
+        let info = null
+        try { info = target ? await fs.stat(target) : null } catch (e) { /* ignore */ }
+        if (!info) return '# 新文件（未跟踪，路径已失效）: ' + f
+        if (info.type === 'directory') {
+          // 未跟踪目录：两层条目树（上限 200 条），让模型至少知道新增了哪些路径
+          const lines = []
+          const queue = [{ target, depth: 0 }]
+          let count = 0
+          while (queue.length > 0 && count < 200) {
+            const item = queue.shift()
+            let entries = []
+            try { entries = await fs.listDir(item.target) } catch (e) { continue }
+            for (const entry of entries) {
+              count++
+              if (count > 200) { lines.push('# ……（目录条目过多，已截断）'); break }
+              const rel = String(f).replace(/\/+$/, '') + '/' + entry.name
+              if (entry.type === 'directory') {
+                lines.push('+' + rel + '/')
+                if (item.depth < 2) queue.push({ target: entry.target, depth: item.depth + 1 })
+              } else {
+                lines.push('+' + rel)
+              }
+            }
+            if (count > 200) break
+          }
+          return lines.join('\n').slice(0, 32 * 1024) || '# 新文件（未跟踪目录）: ' + f
+        }
+        const content = await fsReadText(fullPath)
+        if (content === null) return '# 新文件（二进制，读不出内容）: ' + f
+        const allLines = content.split('\n')
+        const capped = allLines.slice(0, GEN_UNTRACKED_LINE_CAP).map((l) => '+' + l).join('\n')
+        const more = allLines.length > GEN_UNTRACKED_LINE_CAP ? '\n# ……（新文件过长，仅前 ' + GEN_UNTRACKED_LINE_CAP + ' 行）' : ''
+        return 'diff --git a/' + f + ' b/' + f + '\nnew file mode 100644\n--- /dev/null\n+++ b/' + f + '\n@@ -0,0 +1,' + Math.min(GEN_UNTRACKED_LINE_CAP, allLines.length) + ' @@\n' + capped + more
       }
 
       async function runGenerate(genId, prep) {
@@ -2285,8 +2356,11 @@ export default function () {
       }
 
       registerRpc('generate', withRepo(async (repo, args) => {
-        if (!args || !Array.isArray(args.files) || args.files.length === 0) return fail(tr('errGenerateNoFiles'))
-        await audit({ op: 'generate', repo: repo.path, files: args.files.length })
+        // files 允许为空数组：= 按全部未暂存改动生成（Client 仅在无暂存文件时才发它，
+        // 「暂存即选择」在暂存区为空时让位给工作区全量改动）。非数组仍是参数错误；
+        // 目标解析与 diff 组装都在 prepareGenerate 内按 status 走，这里不预判三组是否为空。
+        if (!args || !Array.isArray(args.files)) return fail(tr('errGenerateNoFiles'))
+        await audit({ op: 'generate', repo: repo.path, files: args.files.length, mode: args.files.length > 0 ? 'given' : 'worktree-all' })
         // 任务先落地再读 diff：prepareGenerate 期间用户就能终止（它逐文件检查 task.aborted）。
         // Client 拿到 genId 之前会**乐观地**用自己的 genId 调 generateCancel —— 见 client.js
         // 的 doGenerate / genIdRef 注释，两侧必须同时改，否则「提前点停止」会落在空处。

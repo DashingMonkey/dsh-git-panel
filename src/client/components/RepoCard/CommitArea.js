@@ -1,4 +1,5 @@
-/** 提交区：生成（含终止/进度）、提交、提交并推送，仅处理已暂存（staged）文件。
+/** 提交区：生成（含终止/进度）、提交、提交并推送。生成在暂存区为空时回退到全部未暂存改动；
+ *  （未暂存 diff + 未跟踪新文件内容）；提交与提交并推送仍只处理已暂存（staged）文件。
  *  推送失败现场只经 onPushFail/onPushRetryFail 上报（状态由 RepoCard 持有）。 */
 import React from 'react'
 import { callRpc, isPushNoUpstream } from '../../api.js'
@@ -8,12 +9,15 @@ import { pushToast, store } from '../../store.js'
 import { icon } from '../../icons.js'
 import { RuleEditorModal } from '../RuleEditorModal.js'
 import { GenModelModal } from '../GenModelModal.js'
-// 提交区：仅处理已暂存（staged）文件——生成 / 提交 / 提交并推送都基于 stagedPaths。
+// 提交区：提交 / 提交并推送只处理已暂存（staged）文件；「✦ 生成」另有回退路径——
+// 有暂存时按 staged diff 生成，暂存区为空时发送空 files，由 Host 按工作区全部未暂存
+// 改动解析（含未跟踪新文件的注入内容），生成结果同样只填入不提交。
+// hasChanges 决定「生成」是否可用：任何非冲突改动存在就能生成。
 // conflictedCount > 0 时提交按钮禁用：git 自己也会拒绝（"Committing is not possible
 // because you have unmerged files"，实测 exit 128），面板提前把原因写在按钮提示里。
 // otherOp 不拦提交（实测 rebase / cherry-pick 冲突解决后 git 接受该提交并据此收尾），
 // 只在提示里说明它会成为该操作的提交、并替换掉原提交信息。
-function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus, conflictedCount, otherOp, pushFail, onPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }) {
+function CommitArea({ repo, sessionId, stagedPaths, hasChanges, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus, conflictedCount, otherOp, pushFail, onPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }) {
   const [rulesMenuOpen, setRulesMenuOpen] = React.useState(false)
   const [rulesInfo, setRulesInfo] = React.useState(null)
   const [openRules, setOpenRules] = React.useState(false)
@@ -121,17 +125,23 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
     // 不合规会自己另生成，那时的提前取消会退化成「停止中…直到有结果」而不是误中断）。
     genIdRef.current = 'gen-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
     try {
-      // 生成前先刷新仓库状态：生成基于 staged diff，必须用最新的 staged 文件列表
-      //（外部改动/自动刷新延迟可能让面板列表过期，导致漏掉刚暂存或带上已取消暂存的文件）。
+      // 生成前先刷新仓库状态，用最新变更集决定发送口径：
+      //   - 有暂存 → 发 staged 路径（生成基于 staged diff，「暂存即选择」）；
+      //   - 无暂存但工作区有改动 → 发空数组，Host 按「全部未暂存改动」解析
+      //     （未暂存 diff + 未跟踪新文件内容）；
+      //   - 三组全空 → 没有可生成的对象，toast 后放弃。
+      // 必须用最新状态：外部改动/自动刷新延迟可能让面板列表过期，导致漏掉刚暂存的
+      // 文件（或带上已取消暂存的文件）。
       let paths = stagedPaths
       try {
         const st = await callRpc('status', { repoId: repo.id })
-        if (st && st.ok && Array.isArray(st.staged)) {
-          paths = st.staged.map((f) => f.path)
+        if (st && st.ok) {
+          const all = [].concat(st.staged || [], st.unstaged || [], st.untracked || [])
+          if (all.length === 0) { pushToast('error', tr('noChangesToGenerate')); return }
+          paths = st.staged && st.staged.length > 0 ? st.staged.map((f) => f.path) : []
           if (refreshStatus) refreshStatus()
         }
-      } catch (e) { /* 刷新失败时退用面板现有列表 */ }
-      if (paths.length === 0) { pushToast('error', tr('stageFirst')); return }
+      } catch (e) { /* 刷新失败时退用面板现有列表（空则交由 Host 判定无变更） */ }
       const r = await callRpc('generate', { repoId: repo.id, files: paths, clientGenId: genIdRef.current })
       if (!(r && r.ok)) {
         // Host 在准备 diff 阶段被终止：错误串里带 gen-stopped 标记。这时**不能**弹生成失败
@@ -385,7 +395,7 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
           ? React.createElement('button', { className: 'gp-btn gp-stop-btn', onClick: doCancelGenerate, disabled: cancelling, title: tr('genStopTitle') },
             cancelling ? React.createElement('span', { className: 'gp-spinner' }) : icon('stop'),
             cancelling ? tr('genStopping') : tr('genStop'))
-          : React.createElement('button', { className: 'gp-btn', onClick: doGenerate, disabled: busy !== null || stagedPaths.length === 0, title: genModel ? fmt(tr('genTitleWithModel'), { m: genModel }) : tr('genTitle') },
+          : React.createElement('button', { className: 'gp-btn', onClick: doGenerate, disabled: busy !== null || !hasChanges, title: genModel ? fmt(tr('genTitleWithModel'), { m: genModel }) : (stagedPaths.length > 0 ? tr('genTitle') : tr('genTitleUnstaged')) },
             icon('sparkles'), tr('generate')),
         React.createElement('div', { className: 'gp-menu-wrap' },
           React.createElement('button', { className: 'gp-btn', onClick: () => { setRulesMenuOpen((o) => !o); if (!rulesMenuOpen) loadRulesInfo() } }, icon('gear'), tr('rules') + ' ', icon('chevronDown', 11)),
@@ -402,7 +412,9 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
           ? React.createElement('span', { className: 'gp-gen-progress' }, React.createElement('span', { className: 'gp-spinner' }), genProgress)
           : null,
         generatingNow ? React.createElement('span', { className: 'gp-gen-sep' }, '·') : null,
-        stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : tr('noStaged'))),
+        // 有暂存时报「已暂存 N 个文件」；无暂存但有其他改动时改报「将基于未暂存改动生成」，
+        // 免得用户以为「生成没反应」或误以为必须先暂存；工作区完全干净才显示「暂无暂存文件」
+        (stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : (hasChanges ? tr('noStagedWillGen') : tr('noStaged'))))),
     React.createElement('div', { className: 'gp-commit-actions' },
       React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: () => doCommit(false), disabled: !canCommit, title: conflictedCount > 0 ? fmt(tr('titleResolveFirst'), { n: conflictedCount }) : otherOp ? fmt(tr('titleOtherOp'), { op: otherOp }) : stagedPaths.length === 0 ? tr('titleStageFirst') : fmt(tr('commitTitle'), { n: stagedPaths.length }) },
         busy === 'commit' ? React.createElement('span', { className: 'gp-spinner' }) : icon('check'),

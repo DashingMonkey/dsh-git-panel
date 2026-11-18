@@ -61,7 +61,7 @@
   徽标与 +增/−删 统计；支持自动换行开关、左缘拖拽调宽（`gp-diff-w`）、Esc / 点遮罩关闭。
   untracked 文件渲染为全新增（≤4000 行），untracked 目录渲染为两层目录树（≤200 条）。
 
-## 顶部提交区（仅处理已暂存文件）
+## 顶部提交区（提交仅处理已暂存文件）
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -74,13 +74,17 @@
 │  [■ 停止] [⚙ 规则▾]      ⟳ 生成中 12s · 已暂存 4 个文件 │
 ```
 
-- **生成 / 提交 / 提交并推送都只处理 Staged 文件**：Host 端 `commit` 不隐式
+- **✦ 生成 / ✓ 提交 / ↑ 提交并推送**：提交两条仍只处理 Staged——Host 端 `commit` 不隐式
   `git add`/`git reset`，只提交当前 index（部分提交用 pathspec 限定）；提交信息经
-  stdin（`commit -F -`）传入，规避 Windows 命令行长度与特殊字符问题。
-- **✦ 生成**：实时读当前生效规则 + 已暂存文件的 staged diff（总长 ≤120KB 截断）注入
-  LLM（`llm.stream`；模型优先取面板配置的生成模型，缺省取 `agentDefaultModel.currentSelection()`，
-  再回退第一个 provider/model；maxTokens 8000 / temperature 0.2），结果**只填入不提交**；
-  失败保留原内容并 toast 报错；生成中显示 spinner。
+  stdin（`commit -F -`）传入，规避 Windows 命令行长度与特殊字符问题。**生成另有一条
+  回退路径**：暂存区为空但工作区有改动时，按全部未暂存改动（未暂存 diff + 未跟踪新文件
+  内容）生成，结果同样只填入不提交；工作区完全干净（无任何可生成变更）时「✦ 生成」禁用。
+- **✦ 生成**：实时读当前生效规则 + 变更集 diff（有暂存时按 staged diff；暂存区为空时按
+  全部未暂存改动，未跟踪新文件会读入内容合成整份新增 diff，让模型看到新写了什么；总长
+  ≤120KB 截断）注入 LLM（`llm.stream`；模型优先取面板配置的生成模型，缺省取
+  `agentDefaultModel.currentSelection()`，再回退第一个 provider/model；maxTokens 8000 /
+  temperature 0.2），结果**只填入不提交**；失败保留原内容并 toast 报错；生成中显示 spinner。
+  暂存区为空的那一路，右侧提示改为「暂无暂存，将基于未暂存改动生成」，按钮悬停说明同义。
 - **生成中可终止**：点击生成后「✦ 生成」立刻原位变为「■ 停止」（同一个位置、等宽，
   右侧提示不会抖动），点它即调 `generateCancel` → Host 侧 `AbortController.abort()` 打断
   `llm.stream`，不再继续消耗 token。**已经产出的内容会保留在输入框里**，不会清空，

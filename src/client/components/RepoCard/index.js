@@ -190,6 +190,10 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
   const totalUnstaged = data ? data.unstaged.length : 0
   const totalUntracked = data ? data.untracked.length : 0
   const totalConflicted = data && data.conflicted ? data.conflicted.length : 0
+  // 「生成」按钮可用性：只要有任何非冲突改动就能生成（有暂存按暂存生成，
+  // 没有则回退到全部未暂存改动，见 CommitArea）。冲突组不计入——冲突文件不是
+  // 可提交的变更，生成也覆盖不到它们；提交仍需 staged，在 CommitArea 内部另行判定。
+  const anyChanges = !!(data && data.staged.length + data.unstaged.length + data.untracked.length > 0)
   const mergeInProgress = !!(data && data.mergeInProgress)
   // rebase / cherry-pick / revert 进行中（host 只在「有冲突」或「HEAD detached」时探测，
   // 见 repoStatus）：这三者的冲突同样进冲突组，但收尾出口不在面板里，提示条与提交
@@ -459,7 +463,7 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     React.createElement('div', null,
       status.loading ? React.createElement('div', { className: 'gp-empty' }, tr('loadingStatus')) : status.error ? React.createElement('div', { className: 'gp-empty' }, status.error) :
         React.createElement('div', null,
-          React.createElement(CommitArea, { repo, sessionId, stagedPaths, message, setMessage: updateMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus, conflictedCount: totalConflicted, otherOp, pushFail, onPushFail: applyPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }),
+          React.createElement(CommitArea, { repo, sessionId, stagedPaths, hasChanges: anyChanges, message, setMessage: updateMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus, conflictedCount: totalConflicted, otherOp, pushFail, onPushFail: applyPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }),
           data && data.statusError ? React.createElement('div', { className: 'gp-empty gp-danger' }, fmt(tr('gitStatusFailed'), { e: data.statusError })) : null,
           // 冲突提示条：未解决冲突 / 合并进行中 / rebase 等进行中时出现，给出动作说明 + 出口按钮。
           // 「完成合并」只在「合并进行中且冲突已全部解决、暂存为空」时出现——那种状态下解决
