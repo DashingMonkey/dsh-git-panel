@@ -139,6 +139,10 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
     if (wsPath && wsPath !== scan.root) doScan(wsPath)
   }, [wsPath, scan.root, doScan])
 
+  // 当前工作区根同步进全局 store：CommitArea 的 errRepoMissing 自愈路径要拿它发起
+  // 重扫（跨组件不能引用本组件的 doScan，见 store.js 的 wsRoot 注释）。
+  React.useEffect(() => { store.set((st) => (st.wsRoot === wsPath ? st : { ...st, wsRoot: wsPath })) }, [wsPath])
+
   React.useEffect(() => {
     // 面板挂载时重新同步 DSH 语言：apply 阶段 locale 服务可能尚未就绪，
     // 导致初始 lang 固定为 zh、且后续切换事件也没订阅上。

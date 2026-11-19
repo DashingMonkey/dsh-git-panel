@@ -1722,9 +1722,12 @@ export default function () {
       }
 
       // repo 型 RPC 的公共前置：repoId 解析 + 缺失快速失败（约 20 个注册点共用）
+      // reason='repo-missing'：Client 据此触发自愈（重扫当前工作区 + 原参数重试生成），
+      // 不去匹配 errRepoMissing 的文案——那句话随语言切换就失效（与 push-no-upstream 同款约定，
+      // 详见 toEnvelope 的 details.reason 透传与 api.js unwrapRpc 的摊平）。
       const withRepo = (fn) => async (args) => {
         const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+        if (!repo) return { ok: false, error: tr('errRepoMissing'), reason: 'repo-missing' }
         return await fn(repo, args)
       }
 

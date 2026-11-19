@@ -54,7 +54,10 @@ const LAYOUT_MODES = ['dock', 'overlay']
 
 // currentSessionId：shell 当前主区会话（uiWorkspace.selection 镜像，见 index.js 的订阅）。
 // 新版 DSH（0.1.7+）sessions store 不再暴露 current，靠它实现「切换对话 → 面板跟随工作区」。
-const initialState = () => ({ panelOpen: false, toasts: [], refreshTick: 0, lastOp: null, lastOpRepoId: null, panelW: prefInt('gp-panel-w', 380, 2400, 520), collapsed: prefBool('gp-collapsed', false), layout: prefStr('gp-layout', LAYOUT_MODES, 'dock'), currentSessionId: null })
+// wsRoot：当前会话工作区根路径（GitPanelMain 解析出后写入）。跨组件的唯一共享通道——
+// CommitArea 的「仓库不存在 → 重扫当前工作区 + 重试生成」自愈路径不能引用 GitPanelMain 的
+// doScan 局部函数（跨作用域引用是本项目的 ReferenceError 高发区），改为直接读这里发 scan RPC。
+const initialState = () => ({ panelOpen: false, toasts: [], refreshTick: 0, lastOp: null, lastOpRepoId: null, panelW: prefInt('gp-panel-w', 380, 2400, 520), collapsed: prefBool('gp-collapsed', false), layout: prefStr('gp-layout', LAYOUT_MODES, 'dock'), currentSessionId: null, wsRoot: '' })
 export const store = createStore(initialState())
 // 重装载（apply 再次执行）时打回初始态：旧行为是每次 apply 新建 store
 export function resetStore() {

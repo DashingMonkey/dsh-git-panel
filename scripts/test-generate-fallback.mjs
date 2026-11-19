@@ -9,6 +9,11 @@
  *   3) 有暂存且 files=[已暂存路径] → 注入该文件的 staged diff、无任何「暂存区为空」
  *      说明（旧口径逐字保持）；变更集外的路径仍被拒绝；
  *   4) 只有未暂存修改且 files=[] → 注入未暂存 diff + 说明。
+ *   5) errRepoMissing 的 host 契约：注册表只保留最近一次扫描的根——先扫 A 再扫 B 后，
+ *      generate(A-repoId) 必须失败且带结构化 reason='repo-missing'（Client 自愈判据），
+ *      重扫 A 后该 repoId 重新可用、生成照常进任务流。
+ *   6) Client 自愈接线守卫（token 级）：CommitArea 按 reason 判据、经共享 store 的根 +
+ *      scan RPC 重扫重试，配额一次性；store/GitPanelMain 的 wsRoot 通道在位。
  *
  * llm 用捕获桩代替真实 stream：断言直接打在「最终注入 LLM 的 user_context」上——这是
  * 生成语义的核心契约，而不是把 LLM 调用成败当测试目标。provider/model 选择也顺带钉死
@@ -17,7 +22,7 @@
  * 完全在临时目录里跑（USERPROFILE / settings.prepareDocument 都指向临时根），真实的
  * ~/.dsh 不被读写。npm test 一部分；非 0 退出 = 失败。
  */
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn as cpSpawn } from 'node:child_process'
@@ -142,6 +147,8 @@ async function startHost() {
   }
   const ctx = { get: (k) => services[k], effect: (f) => { const d = f(); return typeof d === 'function' ? d : () => {} }, inject: () => {}, on: () => {} }
   mod.default().apply(ctx, {})
+  // 与生产端 api.js 的 unwrapRpc 同口径摊平（含 details.reason 等业务字段透传）：
+  // errRepoMissing 自愈判据就落在摊平后的 res.reason 上。
   const rpc = async (method, payload) => {
     const res = { writeHead() {}, end(b) { this.__body = b } }
     await routeHandlerFn({
@@ -150,7 +157,17 @@ async function startHost() {
     }, res)
     const env = JSON.parse(res.__body).result
     if (env && env.ok === true) return Object.assign({ ok: true }, env.value || {})
-    return { ok: false, error: env && env.error && (env.error.message || env.error.code) }
+    if (env && env.ok === false && env.error && typeof env.error === 'object') {
+      const err = { ok: false, error: env.error.message || env.error.code || 'error' }
+      const d = env.error.details
+      if (d && typeof d === 'object') {
+        if (typeof d.detail === 'string' && d.detail) err.detail = d.detail
+        if (typeof d.reason === 'string' && d.reason) err.reason = d.reason
+        if (typeof d.command === 'string' && d.command) err.command = d.command
+      }
+      return err
+    }
+    return { ok: false, error: 'bad envelope' }
   }
   return { rpc }
 }
@@ -281,6 +298,56 @@ try {
     ])
     rmSync(repo, { recursive: true, force: true })
   }
+
+  // ---- 5) errRepoMissing 自愈的 host 契约：注册表只保留最近一次扫描的根 ----
+  // 复现用户现场：两个工作区根 A/B，先扫 A 再扫 B → A 的 repoId 已被挤出注册表；
+  // generate(A-repoId) 必须给结构化 reason='repo-missing'（Client 自愈判据，不靠文案匹配），
+  // 重扫 A 后该 repoId 重新可用。Client 侧的自愈接线由场景 6 的守卫钉住。
+  {
+    let checks = []
+    try {
+      const dirA = mkdtempSync(join(tempRoot, 'rootA-'))
+      await gitRaw(dirA, ['init', '-q'])
+      const dirB = mkdtempSync(join(tempRoot, 'rootB-'))
+      await gitRaw(dirB, ['init', '-q'])
+      writeFileSync(join(dirA, 'a.txt'), 'a\n')
+      writeFileSync(join(dirB, 'b.txt'), 'b\n')
+      const h = await startHost()
+      const idA = await bootAndScan(h, dirA)
+      const sB = await h.rpc('scan', { root: dirB, force: true })
+      checks.push(eq(sB.ok, true, '切到 B 扫描成功'))
+      checks.push(eq((sB.repos || []).length, 1, 'B 下只有自己的仓库（注册表已整体替换）'))
+      const gone = await h.rpc('generate', { repoId: idA, files: [] })
+      checks.push(eq(gone.ok, false, '旧 repoId 的 generate 失败'))
+      checks.push(eq(gone.error, '仓库不存在，请重新扫描', '错误文案为 errRepoMissing'))
+      checks.push(eq(gone.reason, 'repo-missing', '结构化判据（Client 自愈依赖它，不做文案匹配）'))
+      // 重扫 A：原 repoId 重新解析成功，生成照常进入任务流——Client 自愈的前置契约
+      const back = await h.rpc('scan', { root: dirA, force: true })
+      checks.push(eq(back.ok, true, '重扫 A 成功'))
+      const again = await h.rpc('generate', { repoId: idA, files: [] })
+      checks.push(eq(again.ok, true, '重扫原根后生成恢复'))
+      checks.push(eq((await waitDone(h, again.genId)).done, true, '恢复后的任务正常收尾'))
+      rmSync(dirA, { recursive: true, force: true })
+      rmSync(dirB, { recursive: true, force: true })
+    } catch (e) {
+      checks = [{ ok: false, msg: '场景抛错: ' + (e && e.message ? e.message : String(e)) }]
+    }
+    scenario('5 切根后旧 repoId：结构化 repo-missing + 重扫原根可恢复（自愈的 host 契约）', checks)
+  }
+
+  // ---- 6) Client 自愈接线守卫（token 级）：CommitArea 收到 repo-missing 时的重扫重试链 ----
+  {
+    const checks = []
+    const ca = readFileSync(join(ROOT, 'src/client/components/RepoCard/CommitArea.js'), 'utf8')
+    checks.push({ ok: ca.indexOf("r.reason === 'repo-missing'") >= 0, msg: 'CommitArea 判 reason（而非匹配 errRepoMissing 文案）' })
+    checks.push({ ok: ca.indexOf('store.get().wsRoot') >= 0 && ca.indexOf("callRpc('scan'") >= 0, msg: '自愈经共享 store 的根 + scan RPC（不引用 GitPanelMain 的 doScan 局部函数）' })
+    checks.push({ ok: /rescanAllowed\s*=\s*false/.test(ca), msg: '「重扫+重试」配额一次性，防递归死循环' })
+    const st = readFileSync(join(ROOT, 'src/client/store.js'), 'utf8')
+    checks.push({ ok: st.indexOf('wsRoot') >= 0, msg: 'store 携带 wsRoot 字段' })
+    const gm = readFileSync(join(ROOT, 'src/client/components/GitPanelMain.js'), 'utf8')
+    checks.push({ ok: gm.indexOf('wsRoot: wsPath') >= 0 || gm.indexOf('{ ...st, wsRoot: wsPath }') >= 0, msg: 'GitPanelMain 把当前工作区根写进 store' })
+    scenario('6 Client 自愈接线守卫（token 级）', checks)
+  }
 } finally {
   process.env.USERPROFILE = prevUserProfile
   if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome
@@ -289,6 +356,6 @@ try {
 
 const failed = results.filter((r) => r.failed.length > 0)
 console.log('\n' + (failed.length === 0
-  ? `✓ 生成口径（无暂存回退 + staged 旧口径）：${results.length} 个场景全部通过`
+  ? `✓ 生成口径（无暂存回退 + staged 旧口径 + 仓库缺失自愈）：${results.length} 个场景全部通过`
   : `✗ 生成口径：${failed.length}/${results.length} 个场景失败\n` + failed.map((f) => '  - ' + f.name + '\n    ' + f.failed.map((x) => x.msg).join('\n    ')).join('\n')))
 process.exit(failed.length === 0 ? 0 : 1)

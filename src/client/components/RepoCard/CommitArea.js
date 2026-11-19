@@ -147,7 +147,32 @@ function CommitArea({ repo, sessionId, stagedPaths, worktreePaths, hasChanges, m
           if (refreshStatus) refreshStatus()
         }
       } catch (e) { /* 刷新失败时退用面板现有列表（空则交由 Host 判定无变更） */ }
-      const r = await callRpc('generate', { repoId: repo.id, files: paths, clientGenId: genIdRef.current })
+      // errRepoMissing 自愈配额：整个 doGenerate 只允许「重扫 + 原参数重试」一次，绝不递归。
+      let rescanAllowed = true
+      // 自愈重试时换用的仓库记录（重扫结果里按 id/path 匹配到的同一仓库）；常规路径
+      // activeRepo === repo，下面的发送点统一读 activeRepo.id。
+      let activeRepo = repo
+      const sendGenerate = () => callRpc('generate', { repoId: activeRepo.id, files: paths, clientGenId: genIdRef.current })
+      let r = await sendGenerate()
+      if (!(r && r.ok) && rescanAllowed && r && r.reason === 'repo-missing') {
+        // 仓库不在该后端的注册表里：注册表只保留最近一次扫描的工作区，而页面上这张卡片是
+        // 客户端旧列表——多个 Harness 窗口并存 / 工作区切换后，点到的 id 与表不符。对策：
+        // 不打扰用户，直接重扫当前工作区根对齐注册表、校验到同一仓库后原参数重试一次。
+        //   - 走共享 store 的 wsRoot + scan RPC 自给自足，不引用 GitPanelMain 的 doScan
+        //     （跨组件局部函数引用是本项目的 ReferenceError 高发区）；
+        //   - host 那次 generate 任务根本没建成（withRepo 先于建任务返回），重试换新 genId
+        //     幂等安全；
+        //   - 拿不到根 / 扫描失败 / 仓库不在结果里 → 按普通生成失败收尾，用原错误文案。
+        rescanAllowed = false
+        const wsRoot = store.get().wsRoot
+        const sr = wsRoot ? await callRpc('scan', { root: wsRoot, force: true }).catch(() => null) : null
+        const hit = sr && sr.ok ? (sr.repos || []).find((x) => x.id === activeRepo.id || x.path === activeRepo.path) : null
+        if (hit) {
+          activeRepo = hit
+          genIdRef.current = 'gen-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+          r = await sendGenerate()
+        }
+      }
       if (!(r && r.ok)) {
         // Host 在准备 diff 阶段被终止：错误串里带 gen-stopped 标记。这时**不能**弹生成失败
         // —— doCancelGenerate 已经/即将弹出「已停止」，再弹一个红色错误就是自相矛盾。
