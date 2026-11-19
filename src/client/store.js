@@ -50,7 +50,7 @@ function createStore(initial) {
     subscribe: (l) => { listeners.add(l); return () => listeners.delete(l) }
   }
 }
-const LAYOUT_MODES = ['dock', 'overlay']
+const LAYOUT_MODES = ['dock', 'overlay', 'native']
 
 // currentSessionId：shell 当前主区会话（uiWorkspace.selection 镜像，见 index.js 的订阅）。
 // 新版 DSH（0.1.7+）sessions store 不再暴露 current，靠它实现「切换对话 → 面板跟随工作区」。

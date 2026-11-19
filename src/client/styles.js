@@ -505,6 +505,22 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
 .gp-layout-opt-desc { font-size: 12px; color: var(--dsw-alias-label-secondary); line-height: 1.5; }
 .gp-layout-default-badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 7px; border: 1px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); flex: none; line-height: 1.6; }
 .gp-layout-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; margin: 6px 0 0; }
+/* ===== 原生侧栏模式（native）：面板成为 DSH 右栏制表签页的页签正文 =====
+   body[data-gp-layout='native'] 由 apply 在布局模式为 native 时挂到 <html> 上。
+   .gp-pane-host 是页签正文的容器（sidebar.right.pane.tab 的直接子元素，面板在
+   其内部）：高度 100%、纵向布局。内部 .gp-panel 不再是 fixed 覆盖层——覆写其
+   固定定位与宽度，让它成为普通文档流的整块（宽=容器宽）。diff 抽屉按「贴容器
+   左缘」重定位：inline right 属性被 !important 压掉，遮罩铺满整窗。 */
+body[data-gp-layout='native'] .gp-pane-host { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+body[data-gp-layout='native'] .gp-pane-host > .gp-panel {
+  position: static; top: auto; right: auto; bottom: auto; left: auto;
+  width: 100%; max-width: none; transform: none; transition: none;
+  box-shadow: none; border-left: 1px solid var(--gp-border-1);
+}
+body[data-gp-layout='native'] .gp-diff-backdrop { right: 0 !important; }
+body[data-gp-layout='native'] .gp-diff-drawer { right: 0 !important; }
+/* 原生模式下侧栏底部开关点亮（面板打开即 tab 可见），作为「此刻开在原生侧栏」的指示 */
+.gp-sidebar-toggle.gp-native-on { color: var(--dsw-alias-brand-primary); }
 `
 
 export { injectCss }

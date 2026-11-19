@@ -15,8 +15,8 @@ function ConfirmModal({ title, body, okLabel, busy, onCancel, onOk }) {
         React.createElement('button', { className: 'gp-btn gp-btn-danger', disabled: !!busy, onClick: onOk }, okLabel))))
 }
 
-// 布局模式设置弹窗：dock（停靠挤压对话）/ overlay（浮窗覆盖）二选一，点击卡片
-// 即生效并记忆 localStorage（gp-layout），无保存按钮；底部提示窄视口自动回退。
+// 布局模式设置弹窗：dock（停靠挤压对话）/ overlay（浮窗覆盖）/ native（原生侧栏制表签页签）
+// 三选一，点击卡片即生效并记忆 localStorage（gp-layout），无保存按钮；底部提示窄视口自动回退。
 // 单选点是纯 CSS 绘制的圆点（无 input 嵌套 button 的非法交互结构）。
 function LayoutSettingsModal({ onClose }) {
   const s = useStore()
@@ -41,6 +41,7 @@ function LayoutSettingsModal({ onClose }) {
       React.createElement('div', { className: 'gp-modal-body' },
         opt('dock', 'modeDock', 'modeDockDesc', 'modeDockBadge'),
         opt('overlay', 'modeOverlay', 'modeOverlayDesc', null),
+        opt('native', 'modeNative', 'modeNativeDesc', null),
         React.createElement('div', { className: 'gp-layout-hint' }, tr('layoutNarrowHint')))))
 }
 export { ConfirmModal, LayoutSettingsModal }
