@@ -85,22 +85,25 @@ function hideNativeTab() {
   store.set((st) => ({ ...st, panelOpen: false }))
 }
 // 页签正文：不传 hook props（GitPanelMain 内部回退到 runtime 暂存的 overlay 钩子），
-// paneClose 让 header 关闭键走「先收页签、再清开关态」。body[data-gp-layout] 属性由本组件
-// 依据布局模式维护——styles.js 的 native 段据此覆写面板与抽屉的定位形态。
+// paneClose 让 header 关闭键走「先收页签、再清开关态」。html 上不加属性——样式段
+// 选择器是 body[data-gp-layout]，写 body 才生效（documentElement 上写是死代码）。
+function setGpLayoutAttr(on) {
+  if (typeof document === 'undefined' || !document.body) return
+  if (on) document.body.setAttribute('data-gp-layout', 'native')
+  else document.body.removeAttribute('data-gp-layout')
+}
 function PaneHost() {
   const s = useStore()
   // 模式不再处于 native：页签空壳没有意义，静默收页签让位给 overlay/dock 实例
   // （开关态保持，由后者的渲染门控决定是否显示，避免切模式时面板闪断）。
   React.useEffect(() => { if (s.layout !== 'native') quietHideNativeTab() }, [s.layout])
   React.useEffect(() => {
-    if (typeof document === 'undefined' || !document.documentElement) return
-    const el = document.documentElement
-    if (s.layout === 'native') el.setAttribute('data-gp-layout', 'native')
-    else el.removeAttribute('data-gp-layout')
+    setGpLayoutAttr(s.layout === 'native')
+    // native 下页签在屏即「打开」：从开始页入口卡片进入的页签不经 openNativeTab、
+    // panelOpen 为假，这里补点亮开关按钮的指示态（纯展示用途，渲染门控在 GitPanelMain）。
+    if (s.layout === 'native' && !s.panelOpen) store.set((st) => ({ ...st, panelOpen: true }))
   }, [s.layout])
-  React.useEffect(() => () => {
-    if (typeof document !== 'undefined' && document.documentElement) document.documentElement.removeAttribute('data-gp-layout')
-  }, [])
+  React.useEffect(() => () => setGpLayoutAttr(false), [])
   return React.createElement(GitPanelMain, { paneClose: () => { hideNativeTab(); store.set((st) => ({ ...st, panelOpen: false })) } })
 }
 
@@ -222,7 +225,7 @@ export default function () {
         disposeCss()
         applyDockGeometry(false, 0, false)
         for (const d of nativeDisposers) { try { d() } catch (e) { /* 幂等 */ } }
-        if (typeof document !== 'undefined' && document.documentElement) document.documentElement.removeAttribute('data-gp-layout')
+        setGpLayoutAttr(false)
       }
     }
   }

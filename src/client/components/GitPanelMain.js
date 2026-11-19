@@ -190,8 +190,10 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
   // 只有这两个字段变化（外部终端里 pull/merge 出冲突正是该场景）；otherOp 同理——
   // rebase 冲突被外部解决后 conflicted 变空、而 rebase 仍在进行，只有它能反映这段过渡。
   const autoFpRef = React.useRef({})
+  // native 下页签在屏即视为打开（同渲染门控口径）：从开始页入口卡片进入的页签
+  // panelOpen 为假，也必须继续轮询，否则状态停摆。
   React.useEffect(() => {
-    if (!s.panelOpen) return
+    if (!(nativePane || s.panelOpen)) return
     // 统一走 timer 服务（动态包沙箱禁用原生 setInterval），链式调度代替轮询定时器
     let stopped = false
     let cancel = null
@@ -230,7 +232,12 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
   // 面板关闭时同步关闭 diff 抽屉，避免下次打开面板时残留上次的 diff 选择
   React.useEffect(() => { if (!s.panelOpen) setDiffSel(null) }, [s.panelOpen])
 
-  if (!s.panelOpen) return null
+  // native 下页签存在即面板在显示：不看 panelOpen——开页签的路径不止我们的开关
+  // （右栏开始页的入口卡片由框架按 kind 直接开页签，不经过 openNativeTab），那条路
+  // 不置 panelOpen，若还拿它当门控就是从开始页进入必空白。panelOpen 在 native 下
+  // 只用于开关按钮的点亮态与切模式时的交接，不参与渲染。
+  const effectiveOpen = nativePane ? true : s.panelOpen
+  if (!effectiveOpen) return null
   const diffRepo = diffSel ? scan.repos.find((r) => r.id === diffSel.repoId) : null
 
   const header = React.createElement('div', { className: 'gp-header' },
@@ -328,10 +335,13 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
     React.createElement('span', { className: 'gp-rail-label' }, 'Git Panel')) : null
 
   // 原生侧栏页签正文容器（styles.js 的 native 段覆写其内部 .gp-panel 的定位与宽度）。
+  // 结构必须保留 .gp-panel 这层：基础样式（底色/左边框/字号）都挂在它身上，native
+  // 段只负责「去 fixed、宽满容器」的覆写——少了这层选择器就是死代码，面板没有底色。
   // 不放左缘拖拽手柄：侧栏宽度由 DSH 自身的边缘手势管理，重复的手柄会与它冲突。
   const paneHost = nativePane ? React.createElement('div', { ref: paneHostRef, className: 'gp-pane-host' },
-    header,
-    React.createElement('div', { className: 'gp-main' }, body)) : null
+    React.createElement('div', { className: 'gp-panel' },
+      header,
+      React.createElement('div', { className: 'gp-main' }, body))) : null
 
   // 抽屉定位源：native 取页签容器实测宽（贴容器左缘，见 styles.js 覆写），其余取面板宽。
   const drawerW = nativePane ? Math.min(960, Math.max(380, paneWidthRef.current)) : s.panelW
