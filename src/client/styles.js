@@ -200,7 +200,12 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
    3px 不影响下面的输入框，is-generating 类只在生成期间挂上。 */
 .gp-commit-area.gp-generating::before { content: ''; display: block; height: 2px; margin: -9px -10px 7px; background: linear-gradient(90deg, transparent, var(--dsw-alias-brand-primary), transparent); background-size: 45% 100%; background-repeat: no-repeat; animation: gp-sweep 1.35s linear infinite; }
 @keyframes gp-sweep { from { background-position: -45% 0; } to { background-position: 145% 0; } }
-.gp-textarea { width: 100%; resize: none; border: 1px solid var(--gp-border-2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); padding: 7px 9px; font-size: 13px; line-height: 1.5; font-family: inherit; min-height: 58px; max-height: 138px; }
+/* 提交信息输入框：内容驱动的自动撑高（CommitArea 的 rows=lineCount，2~6 行封顶）
+   由 min/max-height 收口），同时允许用户按住右下角手柄垂直拖拽调高——短消息时
+   不占地方，长正文（如多要点提交说明）不用折叠就能看全。拖过的显式高度优先于
+   rows 自动口径，拖到上限内后内部滚动；min-height 与默认行数对应，保持紧凑基线。
+   max-height 上限取 300px：再大就把提交区顶出卡片、挤压下方文件列表。 */
+.gp-textarea { width: 100%; resize: vertical; border: 1px solid var(--gp-border-2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); padding: 7px 9px; font-size: 13px; line-height: 1.5; font-family: inherit; min-height: 58px; max-height: 300px; }
 .gp-textarea:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .gp-commit-row { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; gap: 8px; }
 .gp-left-group { display: flex; gap: 6px; align-items: center; }
