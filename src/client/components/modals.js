@@ -2,7 +2,7 @@
 import React from 'react'
 import { tr } from '../i18n.js'
 import { icon } from '../icons.js'
-import { store, savePrefStr, useStore } from '../store.js'
+import { store, savePrefStr, savePrefBool, useStore } from '../store.js'
 // 小型确认弹窗骨架（放弃更改 / Reset / Clean / 中止合并 共用）：warning 图标标题 +
 // 自定义 body + 取消/危险确认按钮；backdrop 点击关闭，Esc 分层由调用方处理
 function ConfirmModal({ title, body, okLabel, busy, onCancel, onOk }) {
@@ -42,6 +42,19 @@ function LayoutSettingsModal({ onClose }) {
         opt('dock', 'modeDock', 'modeDockDesc', 'modeDockBadge'),
         opt('overlay', 'modeOverlay', 'modeOverlayDesc', null),
         opt('native', 'modeNative', 'modeNativeDesc', null),
+        // 独立开关项（不是单选组）：隐藏侧栏底部的 Git Panel 入口按钮。
+        // 关闭后的重新打开路径：native 走右栏开始页卡片；dock/overlay 由折叠竖条兜底。
+        React.createElement('button', {
+          className: 'gp-toggle-opt' + (s.toggleHidden ? ' gp-toggle-on' : ''),
+          onClick: () => {
+            store.set((st) => ({ ...st, toggleHidden: !st.toggleHidden }))
+            savePrefBool('gp-toggle-hidden', !s.toggleHidden)
+          }
+        },
+          React.createElement('span', { className: 'gp-toggle-box', 'aria-hidden': true }),
+          React.createElement('span', { className: 'gp-layout-opt-text' },
+            React.createElement('span', { className: 'gp-layout-opt-title' }, tr('hideToggleTitle')),
+            React.createElement('span', { className: 'gp-layout-opt-desc' }, tr('hideToggleDesc')))),
         React.createElement('div', { className: 'gp-layout-hint' }, tr('layoutNarrowHint')))))
 }
 export { ConfirmModal, LayoutSettingsModal }

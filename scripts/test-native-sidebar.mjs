@@ -33,8 +33,17 @@ const lacks = (hay, needle, msg) => ({ ok: !String(hay).includes(String(needle))
 
 scenario('store 与设置弹窗', [
   has(R('src/client/store.js'), "'native'", 'LAYOUT_MODES 白名单含 native'),
+  has(R('src/client/store.js'), "toggleHidden: prefBool('gp-toggle-hidden', false)", '开关隐藏偏好持久化'),
   has(R('src/client/components/modals.js'), "opt('native'", '设置弹窗第三选项 native'),
-  has(R('src/client/i18n.js'), "modeNative:", '中英文案 modeNative')
+  has(R('src/client/components/modals.js'), 'gp-toggle-opt', '设置弹窗的「隐藏左下角开关」独立开关行'),
+  has(R('src/client/components/modals.js'), "savePrefBool('gp-toggle-hidden'", '开关隐藏写入 localStorage'),
+  has(R('src/client/i18n.js'), 'modeNative:', '中英文案 modeNative'),
+  has(R('src/client/i18n.js'), 'hideToggleTitle:', '中英文案 hideToggleTitle')
+])
+
+scenario('左下角按钮可隐藏与重开兜底', [
+  has(R('src/client/index.js'), 'if (store.get().toggleHidden) return null', '槽位在隐藏偏好开启时整体不渲染'),
+  has(R('src/client/components/GitPanelMain.js'), '(s.toggleHidden && !effectiveOpen)', '隐藏态 dock/overlay 由折叠竖条兜底重开（native 不给，开始页卡片即入口）')
 ])
 
 scenario('overlay 双渲染门控与 hook 暂存', [

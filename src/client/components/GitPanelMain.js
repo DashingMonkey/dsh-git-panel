@@ -326,7 +326,9 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
     header,
     React.createElement('div', { className: 'gp-main' }, body)) : null
 
-  const rail = !nativePane && (s.collapsed || collDir === 'collapse') ? React.createElement('button', {
+  // 隐藏左下角开关后，dock/overlay 的重新打开入口由这条竖条兜底：开关不在、
+  // 面板又收着时，它就是回到面板的唯一把手（native 不给——右栏开始页卡片即入口）。
+  const rail = !nativePane && ((s.collapsed || collDir === 'collapse') || (s.toggleHidden && !effectiveOpen)) ? React.createElement('button', {
     className: 'gp-rail', title: tr('expandTitle'),
     style: { transform: railOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'expand' ? 'none' : undefined },
     onClick: startExpand

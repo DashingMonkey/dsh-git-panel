@@ -194,9 +194,12 @@ export default function () {
 
       // 侧栏底部开关：dock/overlay 切换 panelOpen；native 打开/收起原生页签
       // （再次点击收起页签、右栏随最后一个页签整列收起）。订阅 store 让点亮态实时可见。
+      // 「设置 → 隐藏左下角开关」开启时本槽位整体返回 null；此时 dock/overlay 的重新
+      // 打开路径由折叠竖条兜底（见 GitPanelMain），native 由右栏开始页卡片兜底。
       slots.inject('sidebar.footer.action', () => slots.register(
         { name: 'sidebar.footer.action', id: 'git-panel-toggle', order: 0, label: () => 'Git Panel' },
         (props) => {
+          if (store.get().toggleHidden) return null
           const wide = props && props.wide
           const s = useStore()
           const nativeOn = s.layout === 'native' && s.panelOpen

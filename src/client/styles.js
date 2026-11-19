@@ -503,6 +503,14 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
 .gp-layout-opt-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .gp-layout-opt-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .gp-layout-opt-desc { font-size: 12px; color: var(--dsw-alias-label-secondary); line-height: 1.5; }
+/* 「隐藏左下角开关」独立开关行：外观与布局单选卡一致，但勾选位是方形勾选框
+   （对勾用两条旋转边框拼出，不引入图标资源）。 */
+.gp-toggle-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--gp-border-2); border-radius: 8px; padding: 11px 12px; cursor: pointer; color: var(--dsw-alias-label-primary); font-size: 13px; margin-top: 12px; font-family: inherit; }
+.gp-toggle-opt:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.gp-toggle-on { border-color: var(--dsw-alias-brand-primary); }
+.gp-toggle-box { flex: none; width: 15px; height: 15px; border-radius: 4px; corner-shape: round; border: 1.5px solid var(--gp-border-2); margin-top: 2px; position: relative; transition: border-color .12s ease; background: transparent; }
+.gp-toggle-on .gp-toggle-box { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-brand-primary); }
+.gp-toggle-on .gp-toggle-box::before { content: ''; position: absolute; left: 3.5px; top: 1.5px; width: 4.5px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(38deg); }
 .gp-layout-default-badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 7px; border: 1px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); flex: none; line-height: 1.6; }
 .gp-layout-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; margin: 6px 0 0; }
 /* ===== 原生侧栏模式（native）：面板成为 DSH 右栏制表签页的页签正文 =====

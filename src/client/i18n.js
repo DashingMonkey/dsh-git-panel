@@ -122,6 +122,8 @@ const TEXTS = {
     gpNativeFailed: '原生侧栏不可用：已打开本面板但制表签服务缺失，请检查插件装载',
     // 右栏开始页（引导页）入口卡片：标题与描述取自制表签类型注册的 guide 条目
     gpGuideTitle: 'Git 工作区面板', gpGuideDesc: '暂存 / 提交 / 生成提交信息，跟随当前工作空间',
+    // 设置 → 隐藏左下角 Git Panel 开关按钮（dock/overlay 由折叠竖条兜底重开，native 由开始页卡片兜底）
+    hideToggleTitle: '隐藏左下角 Git Panel 按钮', hideToggleDesc: '侧栏底部不再显示面板入口开关',
     layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
   },
   en: {
@@ -224,6 +226,8 @@ const TEXTS = {
     gpNativeFailed: 'Native sidebar unavailable: the panel is open but its tab service is missing — check plugin loading',
     // Guide-page (start page) entry card in the right sidebar: title and description come from the guide entry of the tab type registration
     gpGuideTitle: 'Git workspace panel', gpGuideDesc: 'Stage, commit, and generate commit messages, following the current workspace',
+    // Settings → hide the bottom-left Git Panel toggle (dock/overlay falls back to the collapse rail; native falls back to the guide-page card)
+    hideToggleTitle: 'Hide the bottom-left Git Panel button', hideToggleDesc: 'No panel entry button at the sidebar footer',
     layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'
   }
 }
