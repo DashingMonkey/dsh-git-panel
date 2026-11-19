@@ -66,6 +66,8 @@ const TEXTS = {
     pushFailUndoHash: '已撤销提交 {h}',
     pushFailNoHash: '无法确认当前 HEAD，已取消撤销（没有校验就撤销可能撤错提交）。刷新面板后重试即可。',
     commit: '提交', committing: '提交中…', pushing: '推送中…', commitAndPush: '提交并推送',
+    // 一键「暂存并提交」：暂存区为空、工作区有改动时主按钮的原位语义（见 CommitArea.doCommit）
+    commitAll: '暂存并提交', commitAllTitle: '一键把工作区全部改动（未暂存 + 未跟踪新文件）暂存后再提交', commitAndPushAllTitle: '先一键暂存工作区全部改动（含未跟踪），提交后推送当前分支', stageFailed: '暂存失败，请重试',
     titleStageFirst: '先用文件右侧的 + 暂存文件', commitTitle: 'git commit（仅已暂存的 {n} 个文件）', pushTitle: '提交成功后推送当前分支',
     loadingStatus: '读取状态…', statusLoadFailed: '读取状态失败', gitStatusFailed: 'git status 失败：{e}', treeClean: '工作区干净，没有变更',
     unstageAll: '取消暂存全部', stageAll: '暂存全部（{n} 个文件）', unstage: '取消暂存', stage: '暂存（git add）',
@@ -164,6 +166,8 @@ const TEXTS = {
     pushFailUndoHash: 'Undid commit {h}',
     pushFailNoHash: 'Could not confirm the current HEAD, so the undo was cancelled (undoing without that check could remove the wrong commit). Refresh the panel and try again.',
     commit: 'Commit', committing: 'Committing…', pushing: 'Pushing…', commitAndPush: 'Commit & Push',
+    // One-click path: primary button reads "Stage All & Commit" when nothing is staged (see CommitArea.doCommit)
+    commitAll: 'Stage All & Commit', commitAllTitle: 'Stage every worktree change (unstaged + untracked) and commit them', commitAndPushAllTitle: 'Stage all worktree changes first (incl. untracked), then commit and push the current branch', stageFailed: 'Staging failed, please retry',
     titleStageFirst: 'Stage files first with +', commitTitle: 'git commit (only {n} staged files)', pushTitle: 'Commits, then pushes the current branch',
     loadingStatus: 'Loading status…', statusLoadFailed: 'Failed to load status', gitStatusFailed: 'git status failed: {e}', treeClean: 'Working tree clean',
     unstageAll: 'Unstage All', stageAll: 'Stage All ({n} files)', unstage: 'Unstage', stage: 'Stage (git add)',
