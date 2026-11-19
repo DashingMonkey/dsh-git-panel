@@ -113,7 +113,7 @@ body[data-ds-dark-theme] .gp-btn-primary { color: #16181d; text-shadow: none; }
 .gp-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; corner-shape: round; animation: gp-spin .8s linear infinite; }
 @keyframes gp-spin { to { transform: rotate(360deg); } }
 .gp-repo-card { background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--gp-border-1); border-radius: 8px; margin-bottom: 8px; }
-.gp-repo-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; cursor: pointer; user-select: none; }
+.gp-repo-head { display: flex; align-items: center; gap: 9px; padding: 8px 10px; cursor: pointer; user-select: none; }
 .gp-repo-name { font-weight: 600; color: var(--dsw-alias-brand-primary); font-size: 14px; cursor: default; }
 .gp-branch { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--gp-border-2); color: var(--dsw-alias-label-secondary); white-space: nowrap; }
 .gp-count { font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
@@ -122,6 +122,11 @@ body[data-ds-dark-theme] .gp-btn-primary { color: #16181d; text-shadow: none; }
 .gp-count-untracked { color: var(--dsw-alias-brand-primary); }
 /* 冲突计数：与提示条同色系，收起/折叠状态下也能一眼看出仓库处于冲突中 */
 .gp-count-conflict { color: var(--dsw-alias-state-warn-primary); font-weight: 600; }
+/* ↓↑ 动作区（RepoCard 头部）：外观继承 .gp-count，只补按钮交互态与点击热区，
+   hover 高亮、禁用退明度（与 .gp-btn-icon 同款语言）。 */
+.gp-sync-btn { border: none; background: transparent; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
+.gp-sync-btn:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.gp-sync-btn:disabled { opacity: .4; cursor: not-allowed; }
 .gp-spacer { flex: 1; }
 .gp-menu-wrap { position: relative; }
 .gp-menu { position: absolute; right: 0; top: calc(100% + 4px); background: var(--gp-pop-bg); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 120; min-width: 250px; padding: 4px; }

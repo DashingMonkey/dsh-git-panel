@@ -443,7 +443,16 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     React.createElement('button', { className: 'gp-btn-icon', onClick: (e) => { e.stopPropagation(); setCollapsed((c) => !c) } }, icon(isCollapsed ? 'chevronRight' : 'chevronDown')),
     React.createElement('span', { className: 'gp-repo-name', title: repo.path }, repo.name),
     data ? React.createElement('span', { className: 'gp-branch' }, icon('branch', 12), data.branch) : null,
-    data && data.aheadBehind ? React.createElement('span', { className: 'gp-count', title: fmt(tr('behindAhead'), { b: data.aheadBehind.behind, a: data.aheadBehind.ahead }) }, icon('arrowDown', 12), data.aheadBehind.behind, ' ', icon('arrowUp', 12), data.aheadBehind.ahead) : null,
+    // ↓↑ 由纯展示计数升级为两个可点击动作区：↓ = Pull（fetch 上游并合并）、↑ = Push
+    // （推送到上游）。与右侧专用 Pull 按钮、⋯ 菜单里的 Push 同级——同样走 runWrite 的
+    // 锁/审计/刷新语义；busy 期间对应一侧换成转圈并禁用；stopPropagation 防止冒泡到整头
+    // 点击（折叠/展开）。无 upstream（aheadBehind 为空）时整组不出。
+    data && data.aheadBehind ? React.createElement(React.Fragment, null,
+      React.createElement('button', { type: 'button', className: 'gp-count gp-sync-btn', title: fmt(tr('syncPullTitle'), { b: data.aheadBehind.behind }), disabled: !!busy, onClick: (e) => { e.stopPropagation(); runWrite('pull', () => callRpc('pull', { repoId: repo.id, sessionId })) } },
+        busy === 'pull' ? React.createElement('span', { className: 'gp-spinner' }) : icon('arrowDown', 12), String(data.aheadBehind.behind)),
+      React.createElement('button', { type: 'button', className: 'gp-count gp-sync-btn', title: fmt(tr('syncPushTitle'), { a: data.aheadBehind.ahead }), disabled: !!busy, onClick: (e) => { e.stopPropagation(); runWrite('push', () => callRpc('push', { repoId: repo.id, sessionId })) } },
+        String(data.aheadBehind.ahead), busy === 'push' ? React.createElement('span', { className: 'gp-spinner' }) : icon('arrowUp', 12))
+    ) : null,
     data && totalStaged > 0 ? React.createElement('span', { className: 'gp-count gp-count-staged', title: fmt(tr('stagedNTitle'), { n: totalStaged }) }, icon('dot', 7), totalStaged) : null,
     // 冲突计数放在三组计数之前：折叠面板时它是唯一还能看见的冲突信号
     data && totalConflicted > 0 ? React.createElement('span', { className: 'gp-count gp-count-conflict', title: fmt(tr('conflictedNTitle'), { n: totalConflicted }) }, icon('warning', 12), totalConflicted) : null,

@@ -81,6 +81,8 @@ const TEXTS = {
     loadingBranches: '读取分支…', branchesLoadFailed: '读取分支失败', newBranchName: '新分支名', createAndSwitch: '创建并切换',
     newBranch: '新建分支…', moreActions: '更多操作', push: '推送（push）', stashChanges: 'Stash 当前变更',
     stashPop: 'Stash pop（最近一条）', behindAhead: '落后 {b} / 领先 {a}', doneSuffix: '{label}完成', failedSuffix: '{label}失败',
+    // 头部 ↓↑ 动作区：箭头从纯展示改为可点击（Pull / Push），悬停说明写明动作与当前差距
+    syncPullTitle: 'Pull（fetch 上游并合并）· 落后 {b} 个提交', syncPushTitle: 'Push（推送到上游）· 领先 {a} 个提交',
     morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Stash pop（最近一条）',
     moreResetSoft: 'Reset（撤销上次提交，保留更改）', moreResetHard: 'Reset Hard（撤销上次提交并丢弃更改）', moreClean: 'Clean（删除未跟踪文件）',
     resetSoftTitle: 'Soft Reset（HEAD~1）', resetHardTitle: 'Hard Reset（HEAD~1）', cleanTitle: 'Clean 未跟踪文件', dangerRun: '执行',
@@ -182,6 +184,8 @@ const TEXTS = {
     loadingBranches: 'Loading branches…', branchesLoadFailed: 'Failed to load branches', newBranchName: 'New branch name', createAndSwitch: 'Create & Switch',
     newBranch: 'New Branch…', moreActions: 'More Actions', push: 'Push', stashChanges: 'Stash Changes',
     stashPop: 'Stash Pop (latest)', behindAhead: 'Behind {b} / Ahead {a}', doneSuffix: '{label} completed', failedSuffix: '{label} failed',
+    // Header ↓↑ action zones (pull / push on click); hover text states the action and the gap
+    syncPullTitle: 'Pull (fetch upstream and merge) · {b} commit(s) behind', syncPushTitle: 'Push (to upstream) · {a} commit(s) ahead',
     morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Pop Latest Stash',
     moreResetSoft: 'Reset (undo last commit, keep changes)', moreResetHard: 'Reset Hard (undo last commit, discard changes)', moreClean: 'Clean (delete untracked files)',
     resetSoftTitle: 'Soft Reset (HEAD~1)', resetHardTitle: 'Hard Reset (HEAD~1)', cleanTitle: 'Clean Untracked Files', dangerRun: 'Run',
