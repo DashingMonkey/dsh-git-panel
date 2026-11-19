@@ -120,6 +120,8 @@ const TEXTS = {
     modeOverlay: '浮窗模式', modeOverlayDesc: '面板浮在对话区域上方，不改变对话布局',
     modeNative: '原生侧栏', modeNativeDesc: '作为 DSH 右侧栏的制表签页签常驻（会话级停靠面），与会话一同收放',
     gpNativeFailed: '原生侧栏不可用：已打开本面板但制表签服务缺失，请检查插件装载',
+    // 右栏开始页（引导页）入口卡片：标题与描述取自制表签类型注册的 guide 条目
+    gpGuideTitle: 'Git 工作区面板', gpGuideDesc: '暂存 / 提交 / 生成提交信息，跟随当前工作空间',
     layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
   },
   en: {
@@ -220,6 +222,8 @@ const TEXTS = {
     modeOverlay: 'Floating overlay', modeOverlayDesc: 'The panel floats above the conversation without changing its layout',
     modeNative: 'Native sidebar', modeNativeDesc: 'Lives as a tab in DSH\'s right sidebar (a per-session docked surface), expanding and collapsing with the conversation',
     gpNativeFailed: 'Native sidebar unavailable: the panel is open but its tab service is missing — check plugin loading',
+    // Guide-page (start page) entry card in the right sidebar: title and description come from the guide entry of the tab type registration
+    gpGuideTitle: 'Git workspace panel', gpGuideDesc: 'Stage, commit, and generate commit messages, following the current workspace',
     layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'
   }
 }

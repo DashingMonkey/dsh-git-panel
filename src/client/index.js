@@ -47,9 +47,10 @@ import { GitPanelMain } from './components/GitPanelMain.js'
 // ===== 原生侧栏模式（layout === 'native'）装配 =====
 // DSH 右栏是「每会话一个停靠面」的制表签系统（见 @deepseek-ai/dsh-client-ui-sidebar-right）：
 // 文件树、终端等第三方页签都经 sidebar.right.pane.tab 槽位注册。本插件把 Git Panel
-// 也做成一页制表签：类型先经 sidebarRightTabs.register 声明（kind + title），正文再经
-// slots 注册；页签身份 contentId 固定，因此重复「打开」只是聚焦既有页签（与 Files
-// 的去重语义一致），不会冒出第二张卡片。apply 返回两个 disposer 随插件卸载。
+// 也做成一页制表签：类型先经 sidebarRightTabs.register 声明（kind + title + guide
+// 引导入口，让开始页有入口卡片），正文再经 slots 注册；页签身份 contentId 固定，
+// 因此重复「打开」只是聚焦既有页签（与 Files 的去重语义一致），不会冒出第二张卡片。
+// apply 返回两个 disposer 随插件卸载。
 const NATIVE_KIND = 'git-panel'
 const NATIVE_TAB_ID = '@dsh-local/git-panel'
 // sessionId → 已开页签 id 的登记表：收起（hide）与避免重复聚焦都要它。
@@ -171,7 +172,16 @@ export default function () {
         const sr = ctx.get('sidebarRight')
         if (tabs && typeof tabs.register === 'function' && sr && typeof sr.openTab === 'function') {
           nativeDisposers.push(ctx.effect(() => {
-            const d = tabs.register({ id: NATIVE_TAB_ID, kind: NATIVE_KIND, title: () => tr('panelLabel') })
+            const d = tabs.register({
+              id: NATIVE_TAB_ID,
+              kind: NATIVE_KIND,
+              title: () => tr('panelLabel'),
+              // 开始页（引导页）入口框：声明 guide 后，右栏框架渲染默认卡片（标题 +
+              // 描述，条目未给图标时用引导页自己的占位图形），点击即按 kind 打开本页签
+              // （与 Files/Terminal 的引导卡片同一套语义）。order 排在官方 builtin
+              // 之后（files 10 / terminal 20），保持相近的展示次序。
+              guide: [{ id: 'panel', order: 30, title: () => tr('gpGuideTitle'), description: () => tr('gpGuideDesc') }]
+            })
             return () => { try { d() } catch (e) { /* dispose 幂等 */ } }
           }, 'git-panel.native-type'))
           nativeDisposers.push(ctx.effect(() => slots.inject('sidebar.right.pane.tab',

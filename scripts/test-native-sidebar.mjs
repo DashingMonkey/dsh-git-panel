@@ -44,7 +44,9 @@ scenario('开关与页签开合语义', [
   has(R('src/client/index.js'), 'sr.openTab(NATIVE_KIND, { params: { contentId: NATIVE_TAB_ID } })', '固定 contentId 打开（重复打开=聚焦，去重语义）'),
   has(R('src/client/index.js'), 'function hideNativeTab', '用户路径收起连开关态复位'),
   has(R('src/client/index.js'), 'function quietHideNativeTab', '模式切换静默收（不动开关态，让 dock/overlay 接管）'),
-  has(R('src/client/index.js'), "tabs.register({ id: NATIVE_TAB_ID, kind: NATIVE_KIND", '类型先注册（kind+title）'),
+  has(R('src/client/index.js'), 'kind: NATIVE_KIND,', '类型先注册（kind+title）'),
+  has(R('src/client/index.js'), "guide: [{ id: 'panel', order: 30, title: () => tr('gpGuideTitle'), description: () => tr('gpGuideDesc') }]", 'guide 声明让开始页（引导页）渲染入口卡片（点击按 kind 开页签）'),
+  has(R('src/client/i18n.js'), 'gpGuideTitle:', '中英文案 gpGuideTitle'),
   has(R('src/client/index.js'), "slots.register({ name: 'sidebar.right.pane.tab', key: NATIVE_TAB_ID }, PaneHost)", '正文再经 slots 注册（与 Files/Terminal 同款两步）')
 ])
 
