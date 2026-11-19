@@ -1457,7 +1457,7 @@ export default function () {
         if (!sel && defaultModel && typeof defaultModel.currentSelection === 'function') {
           try {
             const s = defaultModel.currentSelection()
-            if (s && s.provider && s.model) sel = { provider: s.provider, model: s.model, reasoningEffort: null }
+            if (s && s.provider && s.model) sel = { provider: s.provider, model: s.model, reasoningEffort: (s.reasoningEffort === 'off' || s.reasoningEffort === 'high' || s.reasoningEffort === 'max') ? s.reasoningEffort : null }
           } catch (e) { /* ignore */ }
         }
         if (!sel && llm) {

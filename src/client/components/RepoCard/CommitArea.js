@@ -36,8 +36,9 @@ function CommitArea({ repo, sessionId, stagedPaths, worktreePaths, hasChanges, m
           label = cfg.model
           if (cfg.reasoningEffort) label += fmt(tr('genModelThinkingParen'), { e: cfg.reasoningEffort === 'off' ? tr('genModelEffortOff') : cfg.reasoningEffort === 'high' ? tr('genModelEffortHigh') : tr('genModelEffortMax') })
         } else if (eff) {
-          // 跟随会话默认：模型名 + （默认）标记
+          // 跟随会话默认：模型名 + （默认）+ 会话思考强度标记
           label = eff.model + tr('genModelDefaultMark')
+          if (eff.reasoningEffort) label += fmt(tr('genModelThinkingParen'), { e: eff.reasoningEffort === 'off' ? tr('genModelEffortOff') : eff.reasoningEffort === 'high' ? tr('genModelEffortHigh') : tr('genModelEffortMax') })
         } else {
           label = '-' + tr('genModelDefaultMark')
         }

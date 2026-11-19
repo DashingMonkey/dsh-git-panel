@@ -376,6 +376,7 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected { color: #16181d
 body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-meta { color: rgba(22,24,29,.72); }
 .gp-genmodel-effort { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--gp-border-1); flex-wrap: wrap; }
 .gp-genmodel-effort-label { font-size: 12px; color: var(--dsw-alias-label-secondary); margin-right: 4px; }
+.gp-genmodel-effort-follow { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
 .gp-modal-head { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--gp-border-1); font-weight: 600; font-size: 14px; }
 .gp-modal-body { flex: 1; overflow: auto; padding: 12px 14px; }
 .gp-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 11px 14px; border-top: 1px solid var(--gp-border-1); }

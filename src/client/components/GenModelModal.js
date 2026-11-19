@@ -1,10 +1,10 @@
-/** 生成模型配置弹窗：跟随会话默认 / 按 provider 分组选择模型 + 思考强度。 */
+// 生成模型配置弹窗：跟随会话默认 / 按 provider 分组选择模型 + 思考强度。
+// 跟随会话时思考强度也随会话走（见下方 effort 区域的三态切换）。
 import React from 'react'
 import { callRpc } from '../api.js'
 import { tr, fmt } from '../i18n.js'
 import { pushToast } from '../store.js'
 import { icon } from '../icons.js'
-// 生成模型配置弹窗：跟随会话默认 / 按 provider 分组选择模型 + 思考强度
 function GenModelModal({ onClose, onSaved }) {
   const [st, setSt] = React.useState({ loading: true, providers: [], configured: null, sessionDefault: null, selected: null, effort: null, saving: false, error: '' })
   React.useEffect(() => {
@@ -60,10 +60,16 @@ function GenModelModal({ onClose, onSaved }) {
         listBody,
         React.createElement('div', { className: 'gp-genmodel-effort' },
           React.createElement('span', { className: 'gp-genmodel-effort-label' }, tr('genModelEffort')),
-          effortBtn(null, tr('genModelEffortFollow')),
-          effortBtn('off', tr('genModelEffortOff')),
-          effortBtn('high', tr('genModelEffortHigh')),
-          effortBtn('max', tr('genModelEffortMax'))),
+          // 三态：跟随会话 → 展示会话实际思考强度（不可独立设）；选定模型 → 独立按钮组
+          st.selected === null
+            ? (st.sessionDefault && st.sessionDefault.reasoningEffort
+              ? React.createElement('span', { className: 'gp-genmodel-effort-follow' }, fmt(tr('genModelEffortSession'), { e: st.sessionDefault.reasoningEffort === 'off' ? tr('genModelEffortOff') : st.sessionDefault.reasoningEffort === 'high' ? tr('genModelEffortHigh') : tr('genModelEffortMax') }))
+              : React.createElement('span', { className: 'gp-genmodel-effort-follow' }, tr('genModelEffortSessionPlain')))
+            : React.createElement(React.Fragment, null,
+                effortBtn(null, tr('genModelEffortFollow')),
+                effortBtn('off', tr('genModelEffortOff')),
+                effortBtn('high', tr('genModelEffortHigh')),
+                effortBtn('max', tr('genModelEffortMax')))),
         st.error ? React.createElement('div', { className: 'gp-empty gp-danger' }, st.error) : null),
       React.createElement('div', { className: 'gp-modal-foot' },
         React.createElement('button', { className: 'gp-btn', onClick: onClose, disabled: st.saving }, tr('cancel')),
