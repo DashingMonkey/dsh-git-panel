@@ -293,6 +293,23 @@
 - Pull 遇冲突时错误文案直接给出未解决文件数；合并进行中再次 Pull 会快速失败并提示先
   解决或用「中止合并」，不再抛 git 的 "You have not concluded your merge" 原文。
 
+## 生成用量账（默认关闭）
+
+生成提交信息直接调 `llm.stream`，不走 agent loop、不产生会话事件，因此会话级 token
+统计（如 zcode-usage-stats，只读会话持久化流里的 `assistant/message.usage`）看不到这些
+消耗。git-panel 自己记一笔：
+
+- **开关默认关闭**：开启入口在「⚙ 规则 → 配置生成模型…」弹窗底部「生成用量统计」。
+  开启后每次生成消耗的 token（流里的 `usage` 分片，`totalTokens` 缺失时按
+  input+output+cacheRead+cacheWrite 兜底求和）计入本地账本与审计日志；关闭后停止写
+  新行、历史账本保留且仍可读。升级后行为与之前逐字节一致。
+- **账本**：`$DSH_HOME/git-panel/gen-usage.json`（按天 + 按 `provider/model` 两级聚合，
+  与 rules/logs 同目录、每 profile 一套）；损坏文件按空表降级，写失败内存兜底。
+- **审计**：开关开启期间，每次生成收尾（成功/失败/用户终止全路径）在审计日志追加一行
+  `generate-usage`，带 `tokensInput/tokensOutput/tokensTotal/provider/model/ruleSource`。
+- **界面**：开启后生成进度显示 `生成中 12s · 1.2k tokens`；弹窗底部累计行
+  `累计生成 N 次 · M tokens`。adapter 不给 usage 时只计次、不显示 tokens。
+
 ## 审计日志
 
 - **无审批门**：写操作（commit/pull/push/switch/stash/reset/clean/discard/merge-abort/

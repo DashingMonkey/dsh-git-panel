@@ -1448,6 +1448,127 @@ export default function () {
         return ok({ configured: cfg })
       }
 
+      // ============ 生成用量账（默认关闭，需 genUsage=true 开启）============
+      // 动机：git-panel 直接调 llm.stream 生成提交信息，不走 agent loop、不产生任何会话
+      // 事件，因此会话级 token 统计（如 zcode-usage-stats，只读会话持久化流里的
+      // assistant/message.usage）天然看不到这些消耗。账本把每次生成的 usage 分片累积成
+      // profile 级共享 JSON（$DSH_HOME/git-panel/gen-usage.json，与 rules/logs 同目录），
+      // 作为任何统计工具的潜在数据源。开关存 config.json 的 genUsage 键，缺省 false——
+      // 升级后行为逐字节不变，需在「生成模型配置」弹窗手动开启。
+      async function genUsageConfigPath() {
+        const home = await dshHome()
+        return home ? joinPath(home, 'git-panel', 'config.json') : null
+      }
+      async function genUsageLedgerPath() {
+        const home = await dshHome()
+        return home ? joinPath(home, 'git-panel', 'gen-usage.json') : null
+      }
+      async function loadGenUsageEnabled() {
+        const p = await genUsageConfigPath()
+        if (!p) return false
+        const raw = await fsReadText(p)
+        if (!raw) return false
+        try {
+          const j = JSON.parse(raw)
+          return !!(j && typeof j === 'object' && j.genUsage === true)
+        } catch (e) { return false }
+      }
+      async function saveGenUsageEnabled(enabled) {
+        const p = await genUsageConfigPath()
+        if (!p) return fail(tr('errNoRulesHome'))
+        // 读改写而非盲写：config.json 可能已有其它键，只动 genUsage 一个键
+        let existing = {}
+        const raw0 = await fsReadText(p)
+        if (raw0) { try { existing = JSON.parse(raw0) || {} } catch (e) { /* 损坏按空对象 */ } }
+        existing.genUsage = enabled === true
+        const okW = await writeTextAnywhere(p, JSON.stringify(existing, null, 2) + '\n')
+        if (!okW) return fail(fmt(tr('errRulesWrite'), { p }))
+        return ok({ enabled })
+      }
+      // 本地日期键（与 zcode 的 dateKey 同口径，按机器本地时区折叠）
+      function genUsageDateKey(ms) {
+        const d = new Date(ms)
+        const m = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return d.getFullYear() + '-' + m + '-' + day
+      }
+      // rollup：把一条生成记录并入账本（纯函数、返回新对象不改入参——便于测试钉口径）。
+      // rec.usage 为 null 时只计 calls、token 全 0（adapter 不给 usage 的场景）。
+      // totalTokens 缺失时按 input+output+cacheRead+cacheWrite 兜底求和。
+      function rollupGenUsage(ledger, rec) {
+        const src = (ledger && typeof ledger === 'object' && ledger.days && typeof ledger.days === 'object') ? JSON.parse(JSON.stringify(ledger)) : { version: 1, updatedAt: 0, days: {}, models: {} }
+        const u = rec && rec.usage
+        const input = u && typeof u.inputTokens === 'number' ? u.inputTokens : 0
+        const output = u && typeof u.outputTokens === 'number' ? u.outputTokens : 0
+        const cacheRead = u && typeof u.cacheReadTokens === 'number' ? u.cacheReadTokens : 0
+        const cacheWrite = u && typeof u.cacheWriteTokens === 'number' ? u.cacheWriteTokens : 0
+        const total = u && typeof u.totalTokens === 'number' ? u.totalTokens : input + output + cacheRead + cacheWrite
+        const bump = (b) => {
+          b.calls += 1
+          b.input += input
+          b.output += output
+          b.total += total
+        }
+        const dayKey = genUsageDateKey(rec.at || Date.now())
+        const model = (rec.provider || '') + '/' + (rec.model || 'unknown')
+        const out = { version: 1, updatedAt: rec.at || Date.now(), days: {}, models: {} }
+        for (const k of Object.keys(src.days || {})) out.days[k] = src.days[k]
+        for (const k of Object.keys(src.models || {})) out.models[k] = src.models[k]
+        const dstDay = out.days[dayKey] || (out.days[dayKey] = { calls: 0, input: 0, output: 0, total: 0 })
+        bump(dstDay)
+        const dstModel = out.models[model] || (out.models[model] = { calls: 0, input: 0, output: 0, total: 0 })
+        bump(dstModel)
+        return out
+      }
+      // 汇总视图（供 RPC 返回）：days 按日期升序、models 按总量降序，对齐 zcode 口径的
+      // {date,total,calls} / {model,total,...} 形状，方便任何统计页直接合并。
+      function summarizeGenUsage(data) {
+        const days = []
+        const models = []
+        let calls = 0
+        let input = 0
+        let output = 0
+        let total = 0
+        for (const k of Object.keys((data && data.days) || {}).sort()) {
+          const d = data.days[k]
+          days.push({ date: k, calls: d.calls, input: d.input, output: d.output, total: d.total })
+          calls += d.calls; input += d.input; output += d.output; total += d.total
+        }
+        for (const k of Object.keys((data && data.models) || {}).sort((a, b) => ((data.models[b].total || 0) - (data.models[a].total || 0)))) {
+          const m = data.models[k]
+          models.push({ model: k, calls: m.calls, input: m.input, output: m.output, total: m.total })
+        }
+        return { calls, input, output, total, days, models }
+      }
+      // 账本内存镜像：每进程加载一次（apply 内闭包），写盘失败也不丢本会话的账
+      let genUsageMirrorLoaded = false
+      let genUsageMirror = null
+      async function genUsageData() {
+        if (!genUsageMirrorLoaded) {
+          genUsageMirrorLoaded = true
+          const p = await genUsageLedgerPath().catch(() => null)
+          if (p) {
+            const raw = await fsReadText(p).catch(() => null)
+            if (raw) {
+              try {
+                const j = JSON.parse(raw)
+                if (j && typeof j === 'object' && j.days && typeof j.days === 'object' && j.models && typeof j.models === 'object') genUsageMirror = j
+              } catch (e) { /* 损坏账本按空表处理，历史不可恢复但不影响后续记账 */ }
+            }
+          }
+        }
+        return genUsageMirror
+      }
+      // 记一条生成账：rollup → 更新镜像 → 落盘（写失败静默，内存里的账仍在）。
+      // 只在开关开启时调用（见 runGenerate 的收尾点）。
+      async function recordGenUsage(rec) {
+        const cur = await genUsageData()
+        const next = rollupGenUsage(cur, rec)
+        genUsageMirror = next
+        const p = await genUsageLedgerPath().catch(() => null)
+        if (p) await writeTextAnywhere(p, JSON.stringify(next, null, 2) + '\n').catch(() => { /* 内存兜底 */ })
+      }
+
       async function modelSelection(ignoreConfig) {
         // 优先级：配置的生成模型 → 会话默认模型 → 首个可用 provider/model
         // ignoreConfig=true 时跳过配置（用于返回「跟随当前会话模型」的真实默认）
@@ -1574,7 +1695,7 @@ export default function () {
           .replaceAll('{branch}', status.branch || '(未知)')
           .replaceAll('{file_list}', targets.map((f) => '- ' + f).join('\n'))
           .replaceAll('{staged_diff}', parts.join('\n'))
-        return ok({ sel, rules, userCtx })
+        return ok({ sel, rules, userCtx, repoPath: repo.path })
       }
 
       // 未跟踪文件的生成上下文：与 fileDiff 的 untracked 分支同一形态——读取内容、合成
@@ -1636,6 +1757,17 @@ export default function () {
           const st = llm.stream(Object.assign({}, opts, { signal: ac.signal }))
           for await (const chunk of st) {
             if (chunk.type === 'text-delta') { t += chunk.text; if (onDelta) onDelta(t) }
+            // usage 分片（DSH 契约里位于 finish 之前）：仅当用量开关开启时捕获。
+            // 以最后一次为准，与框架 BlockAssembler 同口径；adapter 不给则保持 null。
+            // totalTokens 缺失时当场补算（input+output+cacheRead+cacheWrite），让 poll 与
+            // 客户端拿到的 usage 恒带 total——rollup 的兜底口径与这里保持同一算法。
+            else if (task.captureUsage && chunk.type === 'usage') {
+              const u = chunk.usage || null
+              if (u && typeof u.totalTokens !== 'number') {
+                u.totalTokens = (typeof u.inputTokens === 'number' ? u.inputTokens : 0) + (typeof u.outputTokens === 'number' ? u.outputTokens : 0) + (typeof u.cacheReadTokens === 'number' ? u.cacheReadTokens : 0) + (typeof u.cacheWriteTokens === 'number' ? u.cacheWriteTokens : 0)
+              }
+              task.usage = u
+            }
             else if (chunk.type === 'finish') {
               const kind = chunk.reason && chunk.reason.kind
               if (kind === 'error' || kind === 'aborted') {
@@ -1701,6 +1833,28 @@ export default function () {
           // 走到这里说明 stream 已收尾，controller 不必再对外暴露。
           // （generateCancel 已提前摘走并 abort 过时，这里把 null 写回同一引用也无害）
           task.ac = null
+          // 用量账的单点发射（成功/失败/终止全路径都到这里）：开关开启才记——
+          // rollup + 落盘 + 审计一行 generate-usage（tokensInput/tokensOutput/
+          // tokensTotal/provider/model/ruleSource），全量与账本文件同口径。
+          // 不 await：账本写入与审计串行化都在各自的链上，绝不阻塞任务回收。
+          if (task.captureUsage && !task.usageEmitted) {
+            task.usageEmitted = true
+            recordGenUsage({
+              at: Date.now(),
+              provider: task.provider || '',
+              model: task.model || '',
+              usage: task.usage || null
+            }).catch(() => { /* 内存兜底 */ })
+            audit({
+              op: 'generate-usage', repo: (prep && prep.repoPath) || '',
+              genId, provider: task.provider || '', model: task.model || '',
+              ruleSource: task.ruleSource || '',
+              tokensInput: (task.usage && typeof task.usage.inputTokens === 'number') ? task.usage.inputTokens : 0,
+              tokensOutput: (task.usage && typeof task.usage.outputTokens === 'number') ? task.usage.outputTokens : 0,
+              tokensTotal: (task.usage && typeof task.usage.totalTokens === 'number') ? task.usage.totalTokens : -1,
+              error: ''
+            })
+          }
           if (timer) timer.timeout(() => genTasks.delete(genId), 60000)
         }
       }
@@ -2368,7 +2522,10 @@ export default function () {
         // Client 拿到 genId 之前会**乐观地**用自己的 genId 调 generateCancel —— 见 client.js
         // 的 doGenerate / genIdRef 注释，两侧必须同时改，否则「提前点停止」会落在空处。
         const genId = genIdFrom(args.clientGenId)
-        const task = { genId, text: '', done: false, error: '', aborted: false, ac: null, ruleSource: '', provider: '', model: '' }
+        const task = { genId, text: '', done: false, error: '', aborted: false, ac: null, ruleSource: '', provider: '', model: '', captureUsage: false, usage: null }
+        // 用量捕获开关：生成发起时读一次盘（热切换对在途任务不追溯——本次任务按发起
+        // 时的状态记账），关闭时消费循环不捕获、poll 的 usage 恒 null。
+        task.captureUsage = await loadGenUsageEnabled().catch(() => false)
         genTasks.set(genId, task)
         const prep = await prepareGenerate(task, repo, args.files.map(String))
         if (!prep.ok) {
@@ -2387,7 +2544,7 @@ export default function () {
         const genId = args && args.genId ? String(args.genId) : ''
         const task = genTasks.get(genId)
         if (!task) return fail(tr('errGenMissing'))
-        const out = ok({ text: liveCleanFence(task.text), done: task.done, error: task.error, aborted: !!task.aborted, ruleSource: task.ruleSource, provider: task.provider, model: task.model })
+        const out = ok({ text: liveCleanFence(task.text), done: task.done, error: task.error, aborted: !!task.aborted, ruleSource: task.ruleSource, provider: task.provider, model: task.model, usage: (task.captureUsage ? task.usage : null) || null })
         if (task.done) genTasks.delete(genId)
         return out
       })
@@ -2445,6 +2602,20 @@ export default function () {
         if (!provider || !model) return fail(tr('errGenModelInvalid'))
         const effort = args.reasoningEffort === 'off' || args.reasoningEffort === 'high' || args.reasoningEffort === 'max' ? args.reasoningEffort : null
         return await saveGenModelConfig({ provider, model, reasoningEffort: effort })
+      })
+
+      // ---- 生成用量账（开关 + 账本读取）----
+      // genUsageGet：开关态 + 汇总（calls/input/output/total + days/models 分布，
+      // 形状对齐 zcode 口径，供任何统计工具直接合并）。genUsageSet：开/关——开启后
+      // 新发生的生成开始累计，关闭后停止写新行，历史账本保留且仍可读。
+      registerRpc('genUsageGet', async () => {
+        const enabled = await loadGenUsageEnabled().catch(() => false)
+        const data = await genUsageData().catch(() => null)
+        return ok(Object.assign({ enabled }, summarizeGenUsage(data)))
+      })
+      registerRpc('genUsageSet', async (args) => {
+        args = args || {}
+        return await saveGenUsageEnabled(args.enabled === true)
       })
 
       registerRpc('models', async () => {

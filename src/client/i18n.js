@@ -122,6 +122,13 @@ const TEXTS = {
     gpNativeFailed: '原生侧栏不可用：已打开本面板但制表签服务缺失，请检查插件装载',
     // 右栏开始页（引导页）入口卡片：标题与描述取自制表签类型注册的 guide 条目
     gpGuideTitle: 'Git 工作区面板', gpGuideDesc: '暂存 / 提交 / 生成提交信息，跟随当前工作空间',
+    // 生成用量统计（默认关闭）：开关 + 累计行 + 生成进度的 tokens 后缀
+    gpUsageLabel: '生成用量统计',
+    gpUsageOffDesc: '已关闭（默认）：不记录生成消耗的 token',
+    gpUsageToggleOn: '关闭统计', gpUsageToggleOff: '开启统计', gpUsageSaving: '切换中…',
+    gpUsageCumulative: '累计生成 {n} 次 · {t} tokens',
+    // 开关 RPC 失败（宿主半体未重启时不支持这两个方法）：指向可执行的下一步
+    gpUsageRpcFailed: '切换失败：宿主尚未支持此功能——请完全退出并重新打开 DeepSeek Harness 后重试',
     // 设置 → 隐藏左下角 Git Panel 开关按钮（dock/overlay 由折叠竖条兜底重开，native 由开始页卡片兜底）
     hideToggleTitle: '隐藏左下角 Git Panel 按钮', hideToggleDesc: '侧栏底部不再显示面板入口开关',
     layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
@@ -226,6 +233,13 @@ const TEXTS = {
     gpNativeFailed: 'Native sidebar unavailable: the panel is open but its tab service is missing — check plugin loading',
     // Guide-page (start page) entry card in the right sidebar: title and description come from the guide entry of the tab type registration
     gpGuideTitle: 'Git workspace panel', gpGuideDesc: 'Stage, commit, and generate commit messages, following the current workspace',
+    // Generation usage accounting (off by default): switch + cumulative row + tokens suffix on generation progress
+    gpUsageLabel: 'Generation usage',
+    gpUsageOffDesc: 'Disabled (default): tokens spent by generations are not recorded',
+    gpUsageToggleOn: 'Disable tracking', gpUsageToggleOff: 'Enable tracking', gpUsageSaving: 'Switching…',
+    gpUsageCumulative: '{n} generations · {t} tokens total',
+    // RPC failure fallback (host half does not support these methods before a restart): point to the actionable next step
+    gpUsageRpcFailed: 'Switch failed: this host build does not support it yet — fully quit and reopen DeepSeek Harness, then retry',
     // Settings → hide the bottom-left Git Panel toggle (dock/overlay falls back to the collapse rail; native falls back to the guide-page card)
     hideToggleTitle: 'Hide the bottom-left Git Panel button', hideToggleDesc: 'No panel entry button at the sidebar footer',
     layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'

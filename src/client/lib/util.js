@@ -48,4 +48,12 @@ const fmtBytes = (n) => {
   if (v < 1024 * 1024) return (v / 1024).toFixed(1) + ' KB'
   return (v / 1024 / 1024).toFixed(2) + ' MB'
 }
-export { GROUP_META, glyphOf, rowKey, splitPath, isImagePath, fmtBytes }
+// token 数人性化显示（生成进度/累计行用）：1234 → 1.2k，1234567 → 1.2M
+const fmtTokens = (n) => {
+  const v = Number(n)
+  if (!isFinite(v) || v <= 0) return '0'
+  if (v >= 1000000) return (v / 1000000).toFixed(1).replace(/\.0$/, '') + 'M'
+  if (v >= 1000) return (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+  return String(Math.round(v))
+}
+export { GROUP_META, glyphOf, rowKey, splitPath, isImagePath, fmtBytes, fmtTokens }

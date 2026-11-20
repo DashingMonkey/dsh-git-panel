@@ -7,6 +7,7 @@ import { tr, fmt } from '../../i18n.js'
 import { getTimer } from '../../runtime.js'
 import { pushToast, store } from '../../store.js'
 import { icon } from '../../icons.js'
+import { fmtTokens } from '../../lib/util.js'
 import { RuleEditorModal } from '../RuleEditorModal.js'
 import { GenModelModal } from '../GenModelModal.js'
 // 提交区：提交 / 提交并推送默认只处理已暂存（staged）文件，「暂存即选择」；
@@ -211,7 +212,10 @@ function CommitArea({ repo, sessionId, stagedPaths, worktreePaths, hasChanges, m
           continue
         }
         setMessage(p.text || '')
-        setGenProgress(fmt(tr('genProgress'), { s: Math.round((Date.now() - genStartRef.current) / 1000), n: (p.text || '').length }))
+        // 用量开关开启且 adapter 给出 usage 时，存活指示追加 tokens 后缀（k/M 格式化）；
+        // 关闭态或 adapter 不给 usage 时不显示任何 token 字样。
+        const tokPart = (p && p.usage && p.usage.totalTokens != null) ? ' · ' + fmtTokens(p.usage.totalTokens) + ' tokens' : ''
+        setGenProgress(fmt(tr('genProgress'), { s: Math.round((Date.now() - genStartRef.current) / 1000), n: (p.text || '').length }) + tokPart)
         // 已经收尾（含被终止）就别再转圈了：存活指示只在 host 说「还没完」时为真
         if (p.aborted || p.done || p.error) setGeneratingNow(false)
         // aborted 是 host 确认过的终态：用户主动点击造成的中断走这条，绝不出红色报错。
