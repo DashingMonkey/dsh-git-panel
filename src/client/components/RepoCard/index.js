@@ -7,6 +7,10 @@ import { pushToast, store, useStore } from '../../store.js'
 import { icon } from '../../icons.js'
 import { GROUP_META, glyphOf, rowKey, splitPath } from '../../lib/util.js'
 import { getMessageDraft, setMessageDraft } from '../../messageDraft.js'
+// 折叠状态记忆（多仓库工作区）：整卡折叠 + 分组展开态按仓库绝对路径记在
+// repoCollapse.js（localStorage 单键，LRU 上限）。卡片卸载重挂时读回，避免每次切换
+// 工作区/会话都要重新摆一遍折叠排版。懒初始化只跑一次，改动后由下方 effect 写回。
+import { getRepoCollapse, setRepoCollapse } from '../../repoCollapse.js'
 import { useMultiSelect } from '../../hooks/useMultiSelect.js'
 import { ConfirmModal } from '../modals.js'
 import { GitGraphView } from '../GitGraphView.js'
@@ -14,7 +18,7 @@ import { CommitArea } from './CommitArea.js'
 import { PushFailModal } from './PushFailModal.js'
 function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
   const [status, setStatus] = React.useState({ loading: true, data: null, error: '' })
-  const [isCollapsed, setCollapsed] = React.useState(false)
+  const [isCollapsed, setCollapsed] = React.useState(() => getRepoCollapse(repo.path).collapsed)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [branchMenu, setBranchMenu] = React.useState({ open: false, loading: false, data: null, error: '', creating: false, newName: '' })
   const [moreMenu, setMoreMenu] = React.useState({ open: false })
@@ -163,9 +167,13 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     if (res && res.ok && !res.summary) res.summary = tr('mergeFinishDone')
     return res
   })
-  // 分组展开/收起（最左侧 chevron）
-  const [groupsOpen, setGroupsOpen] = React.useState({ conflicted: true, staged: true, unstaged: true, untracked: true })
+  // 分组展开/收起（最左侧 chevron）——初值取自该仓库自己的折叠记忆（见 repoCollapse）
+  const [groupsOpen, setGroupsOpen] = React.useState(() => getRepoCollapse(repo.path).groups)
   const toggleGroup = (g) => setGroupsOpen((o) => ({ ...o, [g]: !o[g] }))
+  // 两个排版 state 的**唯一写出口**：任一变化即把全量条目写回该仓库的记忆。
+  // 必须全量打包而非增量补丁——归一器对缺省段按「展开」补，混着旧值增量写会把
+  // 用户显式收起的组又弹回去。
+  React.useEffect(() => { setRepoCollapse(repo.path, { collapsed: !!isCollapsed, groups: groupsOpen }) }, [isCollapsed, groupsOpen])
 
   const openBranchMenu = () => {
     setBranchMenu((b) => ({ ...b, open: !b.open }))
