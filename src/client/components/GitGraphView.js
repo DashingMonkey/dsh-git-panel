@@ -291,7 +291,9 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
     refs.tags.forEach((t, ti) => refEls.push(React.createElement('span', { key: 't' + ti, className: 'gp-grow-ref gp-grow-ref-tag' }, t)))
     const subjectEl = React.createElement('span', { className: 'gp-grow-subject' }, e.subject)
     const refsEl = refEls.length > 0 ? React.createElement('span', { className: 'gp-grow-refs' }, refEls) : null
-    const metaEl = React.createElement('span', { className: 'gp-grow-meta' }, (e.author || '') + ' · ' + (e.date || '').slice(0, 10))
+    // 行右侧小字（作者 · 日期）：设置页开关 showGraphMeta 控制，默认关闭——
+    // 长列表里每行都挂这串小字视觉噪音偏大，需要看日期的用户手动开启即可。
+    const metaEl = s.showGraphMeta ? React.createElement('span', { className: 'gp-grow-meta' }, (e.author || '') + ' · ' + (e.date || '').slice(0, 10)) : null
     // 展开行：SVG 拉高使 lane 贯穿，右侧为「顶栏 + 文件列表」纵向列；普通行保持原平铺。
     // 展开态复用 gp-grow-sel（选中样式：品牌色左边条 + 浅底）
     rows.push(React.createElement('div', {

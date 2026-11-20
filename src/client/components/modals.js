@@ -55,6 +55,18 @@ function LayoutSettingsModal({ onClose }) {
           React.createElement('span', { className: 'gp-layout-opt-text' },
             React.createElement('span', { className: 'gp-layout-opt-title' }, tr('hideToggleTitle')),
             React.createElement('span', { className: 'gp-layout-opt-desc' }, tr('hideToggleDesc')))),
+        // 独立开关项：历史图行右侧小字（作者 · 日期）默认关闭，开启后每行显示。
+        React.createElement('button', {
+          className: 'gp-toggle-opt' + (s.showGraphMeta ? ' gp-toggle-on' : ''),
+          onClick: () => {
+            store.set((st) => ({ ...st, showGraphMeta: !st.showGraphMeta }))
+            savePrefBool('gp-graph-meta', !s.showGraphMeta)
+          }
+        },
+          React.createElement('span', { className: 'gp-toggle-box', 'aria-hidden': true }),
+          React.createElement('span', { className: 'gp-layout-opt-text' },
+            React.createElement('span', { className: 'gp-layout-opt-title' }, tr('showMetaTitle')),
+            React.createElement('span', { className: 'gp-layout-opt-desc' }, tr('showMetaDesc')))),
         React.createElement('div', { className: 'gp-layout-hint' }, tr('layoutNarrowHint')))))
 }
 export { ConfirmModal, LayoutSettingsModal }

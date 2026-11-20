@@ -45,6 +45,18 @@ scenario('store 与设置弹窗', [
   has(R('src/client/i18n.js'), 'hideToggleTitle:', '中英文案 hideToggleTitle')
 ])
 
+scenario('历史图行小字开关（默认关闭）', [
+  has(R('src/client/store.js'), "showGraphMeta: prefBool('gp-graph-meta', false)", '偏好缺省 false（默认不显示日期）'),
+  has(R('src/client/components/modals.js'), 'showGraphMeta: !st.showGraphMeta', '设置弹窗开关翻转写 store'),
+  has(R('src/client/components/modals.js'), "savePrefBool('gp-graph-meta'", '开关写入 localStorage'),
+  has(R('src/client/components/modals.js'), "tr('showMetaTitle')", '弹窗标题键 showMetaTitle'),
+  has(R('src/client/i18n.js'), 'showMetaTitle:', '中英文案 showMetaTitle'),
+  has(R('src/client/i18n.js'), "showMetaDesc: 'Each commit row shows author and date on the right", '英文文案 showMetaDesc'),
+  // GitGraphView 行级条件渲染：开关为真才渲染 metaEl（作者 · 日期）
+  has(R('src/client/components/GitGraphView.js'), "s.showGraphMeta ? React.createElement('span'", 'GitGraphView 按开关条件渲染行小字'),
+  lacks(R('src/client/components/GitGraphView.js'), 'const metaEl = React.createElement', '旧的常显 metaEl 已移除')
+])
+
 scenario('左下角按钮可隐藏与重开兜底', [
   has(R('src/client/index.js'), 'if (store.get().toggleHidden) return null', '槽位在隐藏偏好开启时整体不渲染'),
   has(R('src/client/components/GitPanelMain.js'), '(s.toggleHidden && !effectiveOpen)', '隐藏态 dock/overlay 由折叠竖条兜底重开（native 不给，开始页卡片即入口）')
