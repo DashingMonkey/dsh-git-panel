@@ -131,6 +131,8 @@ const TEXTS = {
     gpUsageRpcFailed: '切换失败：宿主尚未支持此功能——请完全退出并重新打开 DeepSeek Harness 后重试',
     // 设置 → 隐藏左下角 Git Panel 开关按钮（dock/overlay 由折叠竖条兜底重开，native 由开始页卡片兜底）
     hideToggleTitle: '隐藏左下角 Git Panel 按钮', hideToggleDesc: '侧栏底部不再显示面板入口开关',
+    // 原生侧栏「变更详情」页签（Git 历史文件点击新开的那一枚）
+    gpDiffTitle: '变更详情', gpDiffEmpty: '无法读取该文件的变更信息',
     layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
   },
   en: {
@@ -242,6 +244,8 @@ const TEXTS = {
     gpUsageRpcFailed: 'Switch failed: this host build does not support it yet — fully quit and reopen DeepSeek Harness, then retry',
     // Settings → hide the bottom-left Git Panel toggle (dock/overlay falls back to the collapse rail; native falls back to the guide-page card)
     hideToggleTitle: 'Hide the bottom-left Git Panel button', hideToggleDesc: 'No panel entry button at the sidebar footer',
+    // Native sidebar "change details" tab (the one opened when clicking a git-history file)
+    gpDiffTitle: 'Change details', gpDiffEmpty: 'Could not read change information for this file',
     layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'
   }
 }

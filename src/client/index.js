@@ -43,6 +43,8 @@ import { icon } from './icons.js'
 import { applyDockGeometry } from './components/dock.js'
 import { ToastLayer } from './components/ToastLayer.js'
 import { GitPanelMain } from './components/GitPanelMain.js'
+import { DiffPaneHost } from './components/DiffPaneHost.js'
+import { NATIVE_DIFF_KIND } from './nativeDiff.js'
 
 // ===== 原生侧栏模式（layout === 'native'）装配 =====
 // DSH 右栏是「每会话一个停靠面」的制表签系统（见 @deepseek-ai/dsh-client-ui-sidebar-right）：
@@ -53,6 +55,8 @@ import { GitPanelMain } from './components/GitPanelMain.js'
 // apply 返回两个 disposer 随插件卸载。
 const NATIVE_KIND = 'git-panel'
 const NATIVE_TAB_ID = '@dsh-local/git-panel'
+// 变更详情页签（点击 Git 历史里的文件时新开的那一枚；正文见 DiffPaneHost.js）
+const NATIVE_DIFF_TAB_ID = '@dsh-local/git-panel-diff'
 // sessionId → 已开页签 id 的登记表：收起（hide）与避免重复聚焦都要它。
 const nativeTabsBySession = new Map()
 function sidebarRightOf() { return getClientCtx() ? getClientCtx().get('sidebarRight') : null }
@@ -189,6 +193,15 @@ export default function () {
           }, 'git-panel.native-type'))
           nativeDisposers.push(ctx.effect(() => slots.inject('sidebar.right.pane.tab',
             () => slots.register({ name: 'sidebar.right.pane.tab', key: NATIVE_TAB_ID }, PaneHost)), 'git-panel.native-body'))
+          // 「变更详情」页签：类型 + 正文与面板页签同批注册（kind 不同、正文不同）。
+          // 打开动作由 nativeDiff.js 的 openNativeDiffTab 触发（GitPanelMain 在 native
+          // 模式点历史文件时调用），contentId 定死 → 重复点击只聚焦不新增。
+          nativeDisposers.push(ctx.effect(() => {
+            const d = tabs.register({ id: NATIVE_DIFF_TAB_ID, kind: NATIVE_DIFF_KIND, title: () => tr('gpDiffTitle') })
+            return () => { try { d() } catch (e) { /* dispose 幂等 */ } }
+          }, 'git-panel.native-diff-type'))
+          nativeDisposers.push(ctx.effect(() => slots.inject('sidebar.right.pane.tab',
+            () => slots.register({ name: 'sidebar.right.pane.tab', key: NATIVE_DIFF_TAB_ID }, DiffPaneHost)), 'git-panel.native-diff-body'))
         }
       } catch (e) { console.error('[git-panel] 原生侧栏注册失败: ' + (e && e.message ? e.message : String(e))) }
 

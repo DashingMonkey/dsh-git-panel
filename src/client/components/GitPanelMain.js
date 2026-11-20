@@ -1,6 +1,7 @@
 /** 主面板：扫描、工作空间跟随、拖拽调宽、折叠/展开、dock 同步、卡片与抽屉装配。 */
 import React from 'react'
 import { getClientCtx, getTimer, takeOverlayHooks } from '../runtime.js'
+import { openNativeDiffTab } from '../nativeDiff.js'
 import { callRpc } from '../api.js'
 import { tr, fmt, applyLocale } from '../i18n.js'
 import { store, savePrefInt, pushToast, useStore } from '../store.js'
@@ -154,20 +155,6 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
   // 把 header + main 装进 .gp-pane-host 容器；其余逻辑（扫描/自动刷新/草稿）全部共用。
   const nativePane = s.layout === 'native'
   const showDocked = !nativePane && (!s.collapsed || collDir === 'expand')
-  // 页签容器的实测宽度：侧栏宽度由用户拖拽，抽屉定位（贴容器左缘）必须实时跟随。
-  const paneHostRef = React.useRef(null)
-  const paneWidthRef = React.useRef(0)
-  React.useEffect(() => {
-    const el = paneHostRef.current
-    if (!el) return
-    const measure = () => { paneWidthRef.current = Math.max(320, el.offsetWidth) }
-    measure()
-    if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => measure())
-      ro.observe(el)
-      return () => ro.disconnect()
-    }
-  }, [nativePane])
   // paneClose：原生模式点 header 关闭 → 先收起页签（右栏随最后一个页签收起），再清开关态。
   // 无参（dock/overlay）时维持原样：只改 panelOpen，面板不卸载。
 
@@ -282,9 +269,15 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
             // 普通点击行 = 单选该行并打开 diff；再次点击同一行（同 repo 同组同路径，
             // 提交文件还须同 hash）= 进入关闭相位（抽屉滑出动效播完才卸载，见
             // requestCloseDiff/finishCloseDiff）
-            onOpenDiff: (repo2, f, group) => setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group && (prev.hash || null) === (f.hash || null)
-              ? { ...prev, closing: true }
-              : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y, hash: f.hash || null, short: f.short || '', orig: f.orig || null })
+            // native 下点**任何**分组的文件行都开一枚原生侧栏新页签看变更详情；
+            // 只有 dock/overlay 才走贴面板左缘的本地抽屉。锚进当前页签内部的抽屉会被
+            // 页签本体盖住（用户实测确认），所以 native 从不锚内嵌，一律开页签。
+            onOpenDiff: (repo2, f, group) => {
+              if (s.layout === 'native') { openNativeDiffTab(repo2, f, group); return }
+              setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group && (prev.hash || null) === (f.hash || null)
+                ? { ...prev, closing: true }
+                : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y, hash: f.hash || null, short: f.short || '', orig: f.orig || null })
+            },
           })))
 
   // 折叠/展开渲染：稳态只渲染一种形态（panelOpen 语义不变，自动刷新轮询继续）；
@@ -336,17 +329,19 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
     icon('branch', 16),
     React.createElement('span', { className: 'gp-rail-label' }, 'Git Panel')) : null
 
+  // 抽屉只在 dock/overlay 出现（贴面板左缘的覆盖层）；native 的详情一律走新页签
+  //（onOpenDiff → openNativeDiffTab）。曾经的「锚进当前页签内部」方案已废弃：
+  // 那层抽屉会被页签本体盖住，用户看到的是点击无反应。
+  const drawerW = s.panelW
+
   // 原生侧栏页签正文容器（styles.js 的 native 段覆写其内部 .gp-panel 的定位与宽度）。
   // 结构必须保留 .gp-panel 这层：基础样式（底色/左边框/字号）都挂在它身上，native
   // 段只负责「去 fixed、宽满容器」的覆写——少了这层选择器就是死代码，面板没有底色。
   // 不放左缘拖拽手柄：侧栏宽度由 DSH 自身的边缘手势管理，重复的手柄会与它冲突。
-  const paneHost = nativePane ? React.createElement('div', { ref: paneHostRef, className: 'gp-pane-host' },
+  const paneHost = nativePane ? React.createElement('div', { className: 'gp-pane-host' },
     React.createElement('div', { className: 'gp-panel' },
       header,
       React.createElement('div', { className: 'gp-main' }, body))) : null
-
-  // 抽屉定位源：native 取页签容器实测宽（贴容器左缘，见 styles.js 覆写），其余取面板宽。
-  const drawerW = nativePane ? Math.min(960, Math.max(380, paneWidthRef.current)) : s.panelW
 
   return React.createElement(React.Fragment, null,
     React.createElement(DockSync, { on: pushOn, w: pushW, noanim: resizing }),
@@ -354,6 +349,6 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
     rail,
     paneHost,
     settingsOpen ? React.createElement(LayoutSettingsModal, { onClose: () => setSettingsOpen(false) }) : null,
-    diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: drawerW, onClose: finishCloseDiff, onRequestClose: requestCloseDiff }) : null)
+    !nativePane && diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: drawerW, onClose: finishCloseDiff, onRequestClose: requestCloseDiff }) : null)
 }
 export { GitPanelMain }

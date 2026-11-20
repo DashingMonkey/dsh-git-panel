@@ -12,7 +12,11 @@
  *        panelOpen 为假时必须照常出内容（原版从这里进入必空白）；
  *     6) data-gp-layout 属性写 body（与样式段选择器一致，旧 documentElement 写法已消除）；
  *     7) styles.js 有 native 段（面板去 fixed、抽屉贴容器左缘）；
- *     8) 构建产物 lib/client.js 确实含上述注册（防源码/产物漂移）。
+ *     8) 构建产物 lib/client.js 确实含上述注册（防源码/产物漂移）；
+ *     9) native 下点**任何**分组的文件行（含 Git 历史）都开「变更详情」新页签，
+ *        分组随参数走、DiffPaneHost 白名单归一；
+ *    10) 「锚进当前页签内部」的旧方案已废弃：组件与样式里的痕迹须清干净，
+ *        根层抽屉仅限 dock/overlay。
  *
  * npm test 一部分；非 0 退出 = 失败。
  */
@@ -68,8 +72,9 @@ scenario('GitPanelMain 形态门控与抽屉定位', [
   has(R('src/client/components/GitPanelMain.js'), 'if (!(nativePane || s.panelOpen)) return', '自动轮询同口径：开始页进入的页签不停摆'),
   has(R('src/client/components/GitPanelMain.js'), 'className: \'gp-pane-host\'', 'native 渲染进页签容器'),
   has(R('src/client/components/GitPanelMain.js'), 'className: \'gp-panel\'', '页签内保留 .gp-panel 层（基础样式载体 + native 覆写选择器目标）'),
-  has(R('src/client/components/GitPanelMain.js'), 'ResizeObserver', '容器实测宽随侧栏拖拽跟随'),
-  has(R('src/client/components/GitPanelMain.js'), 'const drawerW = nativePane ? Math.min(960, Math.max(380, paneWidthRef.current)) : s.panelW', '抽屉宽度源：native 取实测容器宽'),
+  // native 下抽屉不再出现（详情一律走新页签），宽度源回归面板宽；实测宽代码已删
+  has(R('src/client/components/GitPanelMain.js'), 'const drawerW = s.panelW', '抽屉宽度源回归面板宽（native 无抽屉）'),
+  lacks(R('src/client/components/GitPanelMain.js'), 'paneWidthRef', '容器实测宽的残留代码已清干净'),
   has(R('src/client/components/GitPanelMain.js'), 'if (paneClose) { paneClose(); return }', 'header 关闭键 native 下走收页签')
 ])
 
@@ -80,10 +85,32 @@ scenario('data-gp-layout 属性写 body（选择器是 body[...]）', [
   has(R('src/client/index.js'), 'if (s.layout === \'native\' && !s.panelOpen) store.set((st) => ({ ...st, panelOpen: true }))', '页签挂载补点亮开关（开始页进入的路径）')
 ])
 
+scenario('native 下点任意分组的文件行 → 开「变更详情」新页签', [
+  has(R('src/client/nativeDiff.js'), "const DIFF_KIND = 'git-diff'", '变更详情页签的 kind 声明'),
+  has(R('src/client/nativeDiff.js'), 'function diffTabParams(repo, f, group)', '分组随打开参数走'),
+  has(R('src/client/nativeDiff.js'), 'group: String(group || \'commit\')', 'params 携带 group（缺省 commit）'),
+  has(R('src/client/nativeDiff.js'), 'export function openNativeDiffTab(repo, f, group)', '打开函数带分组入参'),
+  has(R('src/client/nativeDiff.js'), 'sr.openTab(DIFF_KIND, { params })', '开页签经 openTab(kind, params)'),
+  has(R('src/client/nativeDiff.js'), 'lastParamsByContentId', '模块级打开参数快照（正文兜底取参源）'),
+  has(R('src/client/components/DiffPaneHost.js'), 'GROUP_WHITELIST', '正文对分组做白名单归一'),
+  has(R('src/client/components/DiffPaneHost.js'), "const h = group === 'commit' ? (hash || null) : null", '仅 commit 组带 hash（其余组走工作区口径）'),
+  has(R('src/client/components/DiffPaneHost.js'), 'props.useTabInfo()', '正文经框架注入的 useTabInfo 读导航参数'),
+  has(R('src/client/components/DiffPaneHost.js'), 'fitContainer: true', 'DiffDrawer 内嵌铺满页签容器'),
+  has(R('src/client/index.js'), "slots.register({ name: 'sidebar.right.pane.tab', key: NATIVE_DIFF_TAB_ID }, DiffPaneHost)", '变更详情正文注册进 pane.tab'),
+  has(R('src/client/components/GitPanelMain.js'), "if (s.layout === 'native') { openNativeDiffTab(repo2, f, group); return }", 'native 下任何分组都开新页签（不再分支 commit）'),
+  // 「锚进当前页签内部」方案已废弃（那层会被页签本体盖住，用户看到点击无反应）：
+  // 源码与样式里的痕迹必须清干净，防后续误复活
+  lacks(R('src/client/components/GitPanelMain.js'), 'nativeDiffInPane', '页签内嵌详情路径已从组件删除'),
+  lacks(R('src/client/styles.js'), 'gp-inset-full', 'inset-full 死规则已从样式删除'),
+  // 根层覆盖抽屉只在 dock/overlay 出现（native 一律走新页签）
+  has(R('src/client/components/GitPanelMain.js'), '!nativePane && diffSel && diffRepo ? React.createElement(DiffDrawer', '根层抽屉仅限 dock/overlay')
+])
+
 scenario('styles.js native 段', [
-  has(R('src/client/styles.js'), "body[data-gp-layout='native'] .gp-pane-host", 'native 容器样式'),
   has(R('src/client/styles.js'), "body[data-gp-layout='native'] .gp-pane-host > .gp-panel {", '面板覆写：去 fixed 宽满容器'),
-  has(R('src/client/styles.js'), "body[data-gp-layout='native'] .gp-diff-drawer { right: 0 !important; }", '抽屉贴容器左缘')
+  has(R('src/client/styles.js'), "body[data-gp-layout='native'] .gp-pane-host { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; position: relative; }", '页签容器纵向布局（变更详情页签正文的 .gp-diff-panewrap 在其内 flex 撑满）'),
+  has(R('src/client/styles.js'), '.gp-diff-panewrap .gp-diff-drawer {', '抽屉在页签正文容器内定位'),
+  has(R('src/client/styles.js'), 'left: 0 !important; right: 0 !important; width: auto !important; height: 100% !important;', '容器内铺满定位（与组件内联 inset 双保险）')
 ])
 
 scenario('构建产物含注册代码（防源码/产物漂移）', [
