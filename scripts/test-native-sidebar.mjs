@@ -108,6 +108,10 @@ scenario('native 下点任意分组的文件行 → 开「变更详情」新页�
 
 scenario('styles.js native 段', [
   has(R('src/client/styles.js'), "body[data-gp-layout='native'] .gp-pane-host > .gp-panel {", '面板覆写：去 fixed 宽满容器'),
+  // 高度链：native 下面板必须拿到确定高度（height/flex/min-height），否则 gp-main/gp-body
+  // 的滚动失效、长列表底部被 .gp-pane-host 的 overflow:hidden 裁掉（本轮实测故障）
+  // 行尾用独立子串断言（不跨行，兼容 CRLF/LF 混排）
+  has(R('src/client/styles.js'), 'height: 100%; flex: 1 1 auto; min-height: 0;', 'native 面板高度由页签容器决定（滚动链前提）'),
   has(R('src/client/styles.js'), "body[data-gp-layout='native'] .gp-pane-host { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; position: relative; }", '页签容器纵向布局（变更详情页签正文的 .gp-diff-panewrap 在其内 flex 撑满）'),
   has(R('src/client/styles.js'), '.gp-diff-panewrap .gp-diff-drawer {', '抽屉在页签正文容器内定位'),
   has(R('src/client/styles.js'), 'left: 0 !important; right: 0 !important; width: auto !important; height: 100% !important;', '容器内铺满定位（与组件内联 inset 双保险）')

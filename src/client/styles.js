@@ -528,6 +528,10 @@ body[data-gp-layout='native'] .gp-pane-host > .gp-panel {
   position: static; top: auto; right: auto; bottom: auto; left: auto;
   width: 100%; max-width: none; transform: none; transition: none;
   box-shadow: none; border-left: 1px solid var(--gp-border-1);
+  /* ⚠ 高度必须由页签容器决定：去掉 fixed 后若高度仍是 auto，.gp-main / .gp-body 的
+     flex+overflow 滚动链全部失去「确定高度」前提，长列表超出部分会被外层
+     .gp-pane-host 的 overflow:hidden 直接裁掉——底部卡片不可见且滚不动（本轮实测故障）。 */
+  height: 100%; flex: 1 1 auto; min-height: 0;
 }
 /* 「变更详情」原生页签（git-diff kind）正文的容器：native 下点任何分组的文件行都开这枚
    页签，正文由 DiffPaneHost 渲染、DiffDrawer 以 fitContainer 铺满。定位双保险——
