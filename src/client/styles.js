@@ -304,6 +304,12 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
 body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(196,181,253,.5); background: rgba(196,181,253,.12); }
 .gp-cd-ref-tag { color: var(--dsw-alias-state-warn-primary); border-color: rgba(215,166,72,.5); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 50%, transparent); background: rgba(215,166,72,.10); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); }
 .gp-cd-hashrow { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+/* 哈希行复制入口（提交详情浮层）：整行可点，hover 高亮给「这里能点」的视觉提示，
+   与 .gp-btn-icon 的底色语言同款；短哈希与剪贴板图标并排。 */
+.gp-cd-hashrow.gp-hash-copy { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 6px; border-radius: 5px; max-width: 100%; }
+.gp-cd-hashrow.gp-hash-copy:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.gp-cd-hashrow.gp-hash-copy:active { background: var(--dsw-alias-interactive-bg-hover); }
+.gp-cd-hashrow .gp-cd-hash { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* ===== Diff 查看器：从面板左缘滑出的浮层抽屉（z 层级低于面板菜单/模态/通知） ===== */
 .gp-diff-backdrop { position: fixed; top: 0; bottom: 0; left: 0; background: rgba(0,0,0,.22); z-index: 54; pointer-events: auto; transition: opacity .22s cubic-bezier(.2,.8,.2,1); }
 /* 面板不带头影：深度感由整块遮罩提供（遮罩延伸到面板下方，面板滑入盖住它）。

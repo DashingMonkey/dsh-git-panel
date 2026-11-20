@@ -43,6 +43,8 @@ const TEXTS = {
     ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}', genTimeout: '生成超时，请重试',
     commitFailed: '提交失败: {e}', editRules: '编辑提交规则',
     copyRules: '复制当前生效规则到剪贴板',
+    // 提交详情浮层的哈希行复制（点击整行复制完整哈希）；copyFailed 复用规则编辑器同文键的既有定义
+    copyHashTip: '点击复制完整提交哈希', copiedHash: '已复制完整哈希 {s}',
     effectiveRules: '当前生效：{s}', loading: '读取中…', msgPlaceholder: '提交信息（仅提交已暂存的文件；Ctrl+Enter 提交）',
     genTitle: '生成提交信息', genTitleWithModel: '当前生成模型：{m}',
     genTitleUnstaged: '暂无暂存：将基于全部未暂存改动（含未跟踪新文件）生成提交信息',
@@ -162,6 +164,8 @@ const TEXTS = {
     ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}', genTimeout: 'Generation timed out, please retry',
     commitFailed: 'Commit failed: {e}', editRules: 'Edit commit rules',
     copyRules: 'Copy effective rules to the clipboard',
+    // Hash-row copy in the commit detail popover (click the row to copy the full hash); copyFailed reuses the rule editor's existing key
+    copyHashTip: 'Click to copy the full commit hash', copiedHash: 'Copied full hash {s}',
     effectiveRules: 'Effective: {s}', loading: 'Loading…', msgPlaceholder: 'Commit message (commits only staged files; Ctrl+Enter to commit)',
     genTitle: 'Generate commit message', genTitleWithModel: 'Generation model: {m}',
     genTitleUnstaged: 'Nothing staged — will generate from all unstaged changes (incl. untracked files)',

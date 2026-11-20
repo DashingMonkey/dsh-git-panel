@@ -1,9 +1,9 @@
 /** 历史区：SVG 图谱（lane 配色/圆角合并线）+ 行内展开文件列表 + 悬停详情浮层。 */
 import React from 'react'
 import { callRpc } from '../api.js'
-import { tr } from '../i18n.js'
+import { tr, fmt } from '../i18n.js'
 import { getTimer } from '../runtime.js'
-import { useStore } from '../store.js'
+import { pushToast, useStore } from '../store.js'
 import { icon } from '../icons.js'
 import { computeGraph, laneColor, parseRefs } from '../lib/graph.js'
 import { glyphOf, splitPath } from '../lib/util.js'
@@ -81,6 +81,32 @@ function CommitDetailPop({ hover, detailCache, onMouseEnter, onMouseLeave }) {
     refs.remotes.forEach((r, ri) => refChips.push(React.createElement('span', { key: 'r' + ri, className: 'gp-cd-ref gp-cd-ref-remote' }, r)))
     refs.tags.forEach((t, ti) => refChips.push(React.createElement('span', { key: 't' + ti, className: 'gp-cd-ref gp-cd-ref-tag' }, t)))
     const statSum = renderStatSummary(d.data.stat)
+    // 点击整行复制**完整**哈希：优先 Async Clipboard API（安全上下文），不可用或抛错时
+    // 回退 execCommand + 隐藏 textarea（旧浏览器 / 非安全上下文）。成功 toast 回声——
+    // 没有它用户无法确认「点过了」。async 内捕获全部异常，绝不冒泡成渲染错误。
+    const copyFullHash = async () => {
+      const text = String(hover.hash || '')
+      if (!text) return
+      let ok = false
+      // clipboard 非 no-undef 白名单全局（lint 约定见 lint-client.mjs），经 window 取用
+      const clip = window.navigator && window.navigator.clipboard
+      try { if (clip && clip.writeText) { await clip.writeText(text); ok = true } } catch (e) { /* 走回退 */ }
+      if (!ok) {
+        try {
+          const ta = document.createElement('textarea')
+          ta.value = text
+          ta.setAttribute('readonly', '')
+          ta.style.position = 'fixed'
+          ta.style.left = '-9999px'
+          ta.style.top = '-9999px'
+          document.body.appendChild(ta)
+          ta.select()
+          ok = document.execCommand('copy')
+          document.body.removeChild(ta)
+        } catch (e) { ok = false }
+      }
+      pushToast(ok ? 'success' : 'error', ok ? fmt(tr('copiedHash'), { s: short }) : tr('copyFailed'))
+    }
     inner = React.createElement('div', null,
       React.createElement('div', { className: 'gp-cd-sec gp-cd-head' },
         React.createElement('span', { className: 'gp-cd-person' }, icon('person', 14)),
@@ -89,7 +115,11 @@ function CommitDetailPop({ hover, detailCache, onMouseEnter, onMouseLeave }) {
       React.createElement('div', { className: 'gp-cd-sec gp-cd-msg' }, msgEls),
       statSum ? React.createElement('div', { className: 'gp-cd-sec gp-cd-sum' }, statSum) : null,
       refChips.length > 0 ? React.createElement('div', { className: 'gp-cd-sec gp-cd-refs' }, refChips) : null,
-      React.createElement('div', { className: 'gp-cd-sec gp-cd-hashrow', title: hover.hash }, short))
+      // 哈希行 = 复制入口：点击整行复制完整哈希（短哈希仍作正文展示，剪贴板里是全文）。
+      // title 悬停说明从「显示原文」改为动作提示；剪贴板图标给出可点的视觉 affordance。
+      React.createElement('div', { className: 'gp-cd-sec gp-cd-hashrow gp-hash-copy', onClick: () => { void copyFullHash() }, title: tr('copyHashTip') },
+        React.createElement('span', { className: 'gp-cd-hash' }, short),
+        icon('copy', 12)))
   }
   return React.createElement('div', { className: 'gp-cd-pop', style: { left, top }, onMouseEnter, onMouseLeave }, inner)
 }
