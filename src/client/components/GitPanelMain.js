@@ -249,11 +249,12 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
           pushToast('error', (r && r.error) || tr('openFolderUnavailable'))
         }).catch(failToast)
       } }, icon('folder')),
+      // 浮层/停靠模式下不放关闭键：与普通页面右上角的关闭样式混淆，开关统一走侧栏入口（gp-sidebar-toggle）。
+      // native 页签模式例外：这里的关闭键语义是「收起这张页签」，由 PaneHost 传入 paneClose。
       React.createElement('button', { className: 'gp-btn-icon', title: tr('panelSettings'), onClick: () => setSettingsOpen(true) }, icon('gear')),
-      React.createElement('button', { className: 'gp-btn-icon', title: tr('close'), onClick: () => {
+      paneClose ? React.createElement('button', { className: 'gp-btn-icon', title: tr('close'), onClick: () => {
         if (paneClose) { paneClose(); return }
-        store.set((st) => ({ ...st, panelOpen: false }))
-      } }, icon('close'))))
+      } }, icon('close')) : null))
 
   const body = React.createElement('div', { className: 'gp-body' },
     !wsPath ? React.createElement('div', { className: 'gp-empty' }, tr('noWorkspace')) :

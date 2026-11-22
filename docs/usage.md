@@ -2,9 +2,10 @@
 
 > 面板在**命令行版（`dsh web`）与桌面版**下行为一致：两者跑的是同一个 Client 外壳
 > （`dsh-web-app`），Slot 名、props（`useSessions` / `useWorkspaces`）、CSS 变量、RPC 通道
-> 全部相同。桌面版唯一的差别是窗口自带标题栏（`data-windows-titlebar`，Windows 下顶部约
-> 40px 的拖动区），因此**停靠模式下的挤压计算会自动减去这段高度**，面板/抽屉不会与标题栏
-> 重叠；安装与重启方式见[安装详解](install.md)。
+> 全部相同。桌面版的差别在窗口顶带（`--dsh-frame-top-clearance`）：Windows 下外壳自绘
+> caption 行，面板/抽屉从其下沿开始；macOS 下面板/抽屉直接撑到窗口顶，面板标题行加高到
+> 顶带高度（48px）与宿主标题行同行对齐并自带拖动区（标题行空白可拖窗口，按钮可点）。
+> 安装与重启方式见[安装详解](install.md)。
 
 ## 仓库发现与面板布局
 
