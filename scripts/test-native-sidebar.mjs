@@ -75,20 +75,50 @@ scenario('左下角按钮可隐藏与重开兜底', [
 ])
 
 scenario('overlay 双渲染门控与 hook 暂存', [
-  has(R('src/client/index.js'), "if (store.get().layout === 'native') return null", 'overlay 实例 native 下返回 null'),
+  // overlay 包装必须是订阅 store 的组件：只在注册回调里 store.get() 读一次的话，
+  // 从设置切到 native 时它不重渲染、不让位，面板就以浮层身份继续停在右侧
+  //（1.4.0 实测：右栏没开、无页签、data-gp-layout 也没挂，用户看到「切了没变化」）。
+  has(R('src/client/index.js'), 'function OverlayHost(props)', 'overlay 槽位用组件承载（可订阅）'),
+  (() => {
+    const src = R('src/client/index.js')
+    const start = src.indexOf('function OverlayHost')
+    const end = src.indexOf('function setGpLayoutAttr', start)
+    const block = start >= 0 && end > start ? src.slice(start, end) : ''
+    const hook = block.indexOf('const s = useStore()')
+    const gate = block.indexOf("if (s.layout === 'native') return null")
+    return { ok: hook >= 0 && gate > hook, msg: 'OverlayHost 先 useStore 订阅，再按 layout 让位' }
+  })(),
+  has(R('src/client/index.js'), '        OverlayHost', '注册的是 OverlayHost 组件'),
   has(R('src/client/index.js'), 'stashOverlayHooks(', 'overlay props 暂存进 runtime'),
   has(R('src/client/runtime.js'), 'export function stashOverlayHooks', 'runtime 导出暂存器'),
   has(R('src/client/components/GitPanelMain.js'), 'takeOverlayHooks()', '页签正文回退取暂存钩子')
 ])
 
 scenario('开关与页签开合语义', [
-  has(R('src/client/index.js'), 'sr.openTab(NATIVE_KIND, { params: { contentId: NATIVE_TAB_ID } })', '固定 contentId 打开（重复打开=聚焦，去重语义）'),
-  has(R('src/client/index.js'), 'function hideNativeTab', '用户路径收起连开关态复位'),
-  has(R('src/client/index.js'), 'function quietHideNativeTab', '模式切换静默收（不动开关态，让 dock/overlay 接管）'),
+  // 开合动作与 sessionId → 页签 id 登记表在 nativePane.js：设置弹窗（modals.js）也要
+  // 用同一套动作，而 modals 不能反向 import index.js（GitPanelMain → modals 已成边）。
+  has(R('src/client/nativePane.js'), 'sr.openTab(NATIVE_KIND, { params: { contentId: NATIVE_TAB_ID } })', '固定 contentId 打开（重复打开=聚焦，去重语义）'),
+  has(R('src/client/nativePane.js'), 'function hideNativeTab', '用户路径收起连开关态复位'),
+  has(R('src/client/nativePane.js'), 'function quietHideNativeTab', '模式切换静默收（不动开关态，让 dock/overlay 接管）'),
+  has(R('src/client/nativePane.js'), 'function canUseNativePane', '切换前能力检查（无右栏/无会话不切模式）'),
   has(R('src/client/index.js'), 'kind: NATIVE_KIND,', '类型先注册（kind+title）'),
   has(R('src/client/index.js'), "guide: [{ id: 'panel', order: 30, title: () => tr('gpGuideTitle'), description: () => tr('gpGuideDesc') }]", 'guide 声明让开始页（引导页）渲染入口卡片（点击按 kind 开页签）'),
   has(R('src/client/i18n.js'), 'gpGuideTitle:', '中英文案 gpGuideTitle'),
-  has(R('src/client/index.js'), "slots.register({ name: 'sidebar.right.pane.tab', key: NATIVE_TAB_ID }, PaneHost)", '正文再经 slots 注册（与 Files/Terminal 同款两步）')
+  has(R('src/client/index.js'), "slots.register({ name: 'sidebar.right.pane.tab', key: NATIVE_TAB_ID }, PaneHost)", '正文再经 slots 注册（与 Files/Terminal 同款两步）'),
+  has(R('src/client/index.js'), 'registerNativeTab(tabId)', '页签正文挂载时补登记 id（开始页入口卡片路径）'),
+  has(R('src/client/index.js'), 'tab.actions.close()', '切走布局时用框架动作关页签（不依赖内存表）')
+])
+
+scenario('设置里切 native：立即搬进右栏', [
+  has(R('src/client/components/modals.js'), "import { openNativeTab, quietHideNativeTab, canUseNativePane } from '../nativePane.js'", '设置弹窗复用原生页签动作（无循环依赖）'),
+  has(R('src/client/components/modals.js'), 'if (mode === \'native\' && !canUseNativePane())', '无右栏服务/会话时拒绝切换并提示'),
+  has(R('src/client/components/modals.js'), 'if (!openNativeTab()) {', '切 native 时立即开页签'),
+  has(R('src/client/components/modals.js'), 'store.set((st) => ({ ...st, layout: prev }))', '开页签失败回滚布局'),
+  has(R('src/client/components/modals.js'), 'quietHideNativeTab()', '切离 native 时收掉页签（交给 dock/overlay）'),
+  // 右栏开始页的入口卡片按 kind 直接开页签、不经过设置弹窗：正文挂载时要把布局
+  // 切到 native，否则页签里不会出图（dock 面板另有实例），点卡片等于什么都没发生。
+  has(R('src/client/index.js'), 'const mountedRef = React.useRef(false)', '页签正文区分「首次挂载」与「布局被切走」'),
+  has(R('src/client/index.js'), "savePrefStr('gp-layout', 'native')", '入口卡片挂载即切 native 并记忆')
 ])
 
 scenario('GitPanelMain 形态门控与抽屉定位', [

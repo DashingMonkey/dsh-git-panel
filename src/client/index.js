@@ -35,9 +35,9 @@
  * exports.inject 硬依赖见 lib/client.js 模板（slots / connection / workspaces / uiWorkspace）。
  */
 import React from 'react'
-import { initClientServices, getClientCtx, stashOverlayHooks } from './runtime.js'
+import { initClientServices, stashOverlayHooks } from './runtime.js'
 import { initLocale, tr } from './i18n.js'
-import { store, resetStore, pushToast, useStore } from './store.js'
+import { store, resetStore, savePrefStr, useStore } from './store.js'
 import { injectCss, PANEL_CSS } from './styles.js'
 import { icon } from './icons.js'
 import { applyDockGeometry } from './components/dock.js'
@@ -45,6 +45,7 @@ import { ToastLayer } from './components/ToastLayer.js'
 import { GitPanelMain } from './components/GitPanelMain.js'
 import { DiffPaneHost } from './components/DiffPaneHost.js'
 import { NATIVE_DIFF_KIND } from './nativeDiff.js'
+import { NATIVE_KIND, NATIVE_TAB_ID, openNativeTab, hideNativeTab, quietHideNativeTab, registerNativeTab } from './nativePane.js'
 
 // ===== 原生侧栏模式（layout === 'native'）装配 =====
 // DSH 右栏是「每会话一个停靠面」的制表签系统（见 @deepseek-ai/dsh-client-ui-sidebar-right）：
@@ -52,41 +53,22 @@ import { NATIVE_DIFF_KIND } from './nativeDiff.js'
 // 也做成一页制表签：类型先经 sidebarRightTabs.register 声明（kind + title + guide
 // 引导入口，让开始页有入口卡片），正文再经 slots 注册；页签身份 contentId 固定，
 // 因此重复「打开」只是聚焦既有页签（与 Files 的去重语义一致），不会冒出第二张卡片。
-// apply 返回两个 disposer 随插件卸载。
-const NATIVE_KIND = 'git-panel'
-const NATIVE_TAB_ID = '@dsh-local/git-panel'
-// 变更详情页签（点击 Git 历史里的文件时新开的那一枚；正文见 DiffPaneHost.js）
+// 页签的开合动作与 id 登记下沉到 nativePane.js：布局设置弹窗（modals.js）选 native
+// 时也要立即开页签，而 modals 不能反向 import 本文件（GitPanelMain → modals 已是
+// 一条依赖边）。
 const NATIVE_DIFF_TAB_ID = '@dsh-local/git-panel-diff'
-// sessionId → 已开页签 id 的登记表：收起（hide）与避免重复聚焦都要它。
-const nativeTabsBySession = new Map()
-function sidebarRightOf() { return getClientCtx() ? getClientCtx().get('sidebarRight') : null }
-// 打开（或聚焦既有）本面板的原生页签；无屏幕会话/服务缺失时 toast 提示，绝不静默失效。
-function openNativeTab() {
-  const sid = store.get().currentSessionId
-  if (!sid) { pushToast('error', tr('gpNativeFailed')); return }
-  const sr = sidebarRightOf()
-  if (!sr || typeof sr.openTab !== 'function') { pushToast('error', tr('gpNativeFailed')); return }
-  try {
-    sr.openTab(NATIVE_KIND, { params: { contentId: NATIVE_TAB_ID } })
-    const t = typeof sr.active === 'function' ? sr.active() : null
-    if (t && t.id) nativeTabsBySession.set(sid, t.id)
-    store.set((st) => ({ ...st, panelOpen: true }))
-  } catch (e) { pushToast('error', tr('gpNativeFailed')) }
-}
-// 收起页签（两种收尾）：
-//   hideNativeTab     —— 用户主动收（开关再点 / header 关闭键）：连 panelOpen 一起复位；
-//   quietHideNativeTab —— 模式切换等非用户路径的静默收，只关页签不动开关态，
-//                       让 dock/overlay 实例按当前 panelOpen 无缝接管。
-function quietHideNativeTab() {
-  const sid = store.get().currentSessionId
-  const tid = sid ? nativeTabsBySession.get(sid) : undefined
-  const sr = sidebarRightOf()
-  try { if (tid && sr && typeof sr.hide === 'function') sr.hide(tid) } catch (e) { /* 忽略 */ }
-  if (sid) nativeTabsBySession.delete(sid)
-}
-function hideNativeTab() {
-  quietHideNativeTab()
-  store.set((st) => ({ ...st, panelOpen: false }))
+// shell.overlay 的包装组件：**必须订阅 store**，不能在注册回调里用 store.get() 读一次。
+// 1.4.0 的原始写法不订阅 layout：从设置里切到 native 时这里不重渲染、不让位，而
+// GitPanelMain 自己已经翻成 paneHost 形态 —— 面板就以浮层身份继续钉在右侧
+//（右栏没打开、没有页签、data-gp-layout 也没挂），用户看到的是「选了原生侧栏，
+// 面板一点没动，还在侧面」。订阅后切换即卸载 overlay 实例，由原生页签接管。
+function OverlayHost(props) {
+  // 每次渲染都把 slot props 暂存进 runtime：native 页签正文没有这份 hook props，
+  // GitPanelMain 经 takeOverlayHooks 回退（见 runtime.js）。
+  stashOverlayHooks(props && props.useSessions, props && props.useWorkspaces)
+  const s = useStore()
+  if (s.layout === 'native') return null
+  return React.createElement(GitPanelMain, { useSessions: props && props.useSessions, useWorkspaces: props && props.useWorkspaces })
 }
 // 页签正文：不传 hook props（GitPanelMain 内部回退到 runtime 暂存的 overlay 钩子），
 // paneClose 让 header 关闭键走「先收页签、再清开关态」。html 上不加属性——样式段
@@ -96,19 +78,58 @@ function setGpLayoutAttr(on) {
   if (on) document.body.setAttribute('data-gp-layout', 'native')
   else document.body.removeAttribute('data-gp-layout')
 }
-function PaneHost() {
+function PaneHost(props) {
   const s = useStore()
-  // 模式不再处于 native：页签空壳没有意义，静默收页签让位给 overlay/dock 实例
-  // （开关态保持，由后者的渲染门控决定是否显示，避免切模式时面板闪断）。
-  React.useEffect(() => { if (s.layout !== 'native') quietHideNativeTab() }, [s.layout])
+  // 页签正文的标准注入（sidebar.right.pane.tab 的 hookContext 提供 useTabInfo）：
+  // 拿到本页签的 id 与框架动作。开始页入口卡片开的页签不经过 openNativeTab，
+  // id 靠这里补登记，开关的收起才有据可依；切走布局时也用框架动作关掉自己，
+  // 不依赖内存登记表。
+  const hk = typeof (props && props.useTabInfo) === 'function' ? props.useTabInfo() : null
+  const tab = hk && hk.tab ? hk.tab : null
+  const tabId = tab && tab.id ? tab.id : null
+  const mountedRef = React.useRef(false)
+  React.useEffect(() => { if (tabId) registerNativeTab(tabId) }, [tabId, s.currentSessionId])
+  React.useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      // 挂载即代表用户从右栏入口打开了本面板页签（开始页的入口卡片，或上次留下的
+      // 页签）。此时布局还停在 dock/overlay —— 卡片本就是 native 的入口，这里把
+      // 布局切过来；否则页签里不该画任何东西（dock 面板另有实例），点了卡片就只剩
+      // 一枚空白页签。只切 store + 偏好，不重复开页签（已经在开了）。
+      if (s.layout !== 'native') {
+        store.set((st) => (st.layout === 'native' ? st : { ...st, layout: 'native', panelOpen: true }))
+        savePrefStr('gp-layout', 'native')
+      }
+      return
+    }
+    if (s.layout === 'native') return
+    // 模式已切走：主动关掉这枚页签，否则右栏会留一页空白的 Git Panel。
+    // 框架动作拿不到时退回内存登记表（quietHideNativeTab）。
+    try {
+      if (tab && tab.actions && typeof tab.actions.close === 'function') { tab.actions.close(); return }
+    } catch (e) { /* 落到下面的登记表兜底 */ }
+    quietHideNativeTab()
+  }, [s.layout, tab])
   React.useEffect(() => {
     setGpLayoutAttr(s.layout === 'native')
     // native 下页签在屏即「打开」：从开始页入口卡片进入的页签不经 openNativeTab、
     // panelOpen 为假，这里补点亮开关按钮的指示态（纯展示用途，渲染门控在 GitPanelMain）。
     if (s.layout === 'native' && !s.panelOpen) store.set((st) => ({ ...st, panelOpen: true }))
   }, [s.layout])
-  React.useEffect(() => () => setGpLayoutAttr(false), [])
-  return React.createElement(GitPanelMain, { paneClose: () => { hideNativeTab(); store.set((st) => ({ ...st, panelOpen: false })) } })
+  React.useEffect(() => () => {
+    setGpLayoutAttr(false)
+    // 页签被框架关闭（页签上的 X / 关闭快捷键）时不会经过 paneClose：开关态会停在
+    // 「已打开」，下一次点左下角开关只会先「收」一下、要再点一次才重开。
+    // 布局仍是 native 说明这是用户关页签，不是切模式（切走时要保留 panelOpen，
+    // 让 dock/overlay 实例无缝接管），这里把开关态复位。
+    if (store.get().layout === 'native' && store.get().panelOpen) {
+      store.set((st) => ({ ...st, panelOpen: false }))
+    }
+  }, [])
+  // 布局已切走：先不出图（等上面的关闭 effect 收页签），避免在页签里渲染一版
+  // fixed 定位的 dock 面板。
+  if (s.layout !== 'native') return null
+  return React.createElement(GitPanelMain, { paneClose: hideNativeTab })
 }
 
 export default function () {
@@ -156,17 +177,11 @@ export default function () {
         () => React.createElement(ToastLayer)
       ))
 
-      // shell.overlay 的槽位 props（useSessions / useWorkspaces）必须原样暂存到
-      // runtime.js：原生侧栏模式的页签正文没有这份 props，而工作区解析需要同一批
-      // 快照订阅器。注册回调每次渲染都先 stash，再按布局模式决定是否出图——
-      // native 模式下面板由侧栏页签承载，overlay 实例返回 null，绝不双渲染。
+      // 面板实体（dock/overlay）由 OverlayHost 承载：它订阅 store，切到 native 时
+      // 返回 null 立即让位（不订阅就会以浮层身份继续停在右侧，见 OverlayHost 注释）。
       slots.inject('shell.overlay', () => slots.register(
         { name: 'shell.overlay', id: 'git-panel', order: 40, label: () => tr('panelLabel') },
-        (props) => {
-          stashOverlayHooks(props && props.useSessions, props && props.useWorkspaces)
-          if (store.get().layout === 'native') return null
-          return React.createElement(GitPanelMain, { useSessions: props && props.useSessions, useWorkspaces: props && props.useWorkspaces })
-        }
+        OverlayHost
       ))
 
       // ===== 原生侧栏页签装配（布局模式 native 时承载面板）=====
