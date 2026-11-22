@@ -281,6 +281,24 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     return names.length > MAX ? names.slice(0, MAX).join('\n') + '\n' + fmt(tr('discardMore'), { n: names.length - MAX }) : names.join('\n')
   }
 
+  // 批量操作（无独立工具栏）：多选后点击任一选中行的
+  // 放弃/暂存/取消暂存按钮即作用于全部选中文件；点击未选中行的按钮仅作用于该行。
+  // 必须声明在 renderGroup 之前：行内按钮在渲染时引用这些名字，晚声明会踩
+  // no-use-before-define 守卫（也是 TDZ 类事故的同源形态）。
+  const inSelection = (key) => selKeys.has(key) && selCount > 0
+  const stageFromRow = async (key, path) => {
+    if (!inSelection(key)) { stage([path]); return }
+    if ((await stage(selParts.unstaged.concat(selParts.untracked))) === 'ok') setSelKeys(new Set())
+  }
+  const unstageFromRow = async (key, path) => {
+    if (!inSelection(key)) { unstage([path]); return }
+    if ((await unstage(selParts.staged)) === 'ok') setSelKeys(new Set())
+  }
+  const discardFromRow = (key, path, group) => {
+    if (inSelection(key)) askDiscardSelection()
+    else askDiscard([path], group)
+  }
+
   const renderGroup = (group, list) => {
     list = list || []
     // 「更改」为空时仍保留标题行（占位提示）；其余分组（含冲突组）为空时整组隐藏
@@ -332,22 +350,6 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
               : React.createElement('button', { className: 'gp-icon-btn', title: isConflicted ? tr('resolveFile') : tr('stage'), disabled: !!busy, onClick: (e) => { e.stopPropagation(); stageFromRow(key, f.path) } }, icon('plus'))),
           React.createElement('span', { className: 'gp-file-badge ' + gl.cls }, gl.g))
       }))
-  }
-
-  // 批量操作（无独立工具栏）：多选后点击任一选中行的
-  // 放弃/暂存/取消暂存按钮即作用于全部选中文件；点击未选中行的按钮仅作用于该行
-  const inSelection = (key) => selKeys.has(key) && selCount > 0
-  const stageFromRow = async (key, path) => {
-    if (!inSelection(key)) { stage([path]); return }
-    if ((await stage(selParts.unstaged.concat(selParts.untracked))) === 'ok') setSelKeys(new Set())
-  }
-  const unstageFromRow = async (key, path) => {
-    if (!inSelection(key)) { unstage([path]); return }
-    if ((await unstage(selParts.staged)) === 'ok') setSelKeys(new Set())
-  }
-  const discardFromRow = (key, path, group) => {
-    if (inSelection(key)) askDiscardSelection()
-    else askDiscard([path], group)
   }
 
   // 放弃更改确认弹窗（单行 / 组全部 / 多选批量统一入口；Esc 由上方分层处理关闭）

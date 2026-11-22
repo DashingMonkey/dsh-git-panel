@@ -62,19 +62,27 @@ for (const file of files) {
       sourceType: 'module',
       globals: BROWSER_GLOBALS
     },
-    rules: { 'no-undef': 'error' }
+    rules: {
+      'no-undef': 'error',
+      // TDZ 守卫：变量在声明前被读取（const/let）在语法上完全合法，运行时才抛
+      // "Cannot access 'x' before initialization"，且会被 slot 错误边界吞成
+      // 「点了没反应」。1.4.0 合并后 GitPanelMain 的 showDocked 读了声明在渲染段的
+      // collDir，折叠态必崩，就是这条规则能提前拦住的。函数声明有提升，不检查。
+      'no-use-before-define': ['error', { functions: false, classes: false, variables: true, allowNamedExports: false }]
+    }
   }, file)
   if (messages.length === 0) continue
   failed = true
   console.error('✗ ' + rel)
   for (const m of messages) {
-    console.error(`    L${m.line}:${m.column} ${m.fatal ? '解析错误' : 'no-undef'}: ${m.message}`)
+    console.error(`    L${m.line}:${m.column} ${m.fatal ? '解析错误' : (m.ruleId || 'lint')}: ${m.message}`)
   }
 }
 
 if (failed) {
-  console.error('\n客户端源码存在未定义标识符/解析错误（见上）。缺的是漏 import 还是拼错的局部名，' +
-    '按名字到对应模块里核对——这正是曾把面板整个 slot 崩掉的那类错误。')
+  console.error('\n客户端源码存在未定义标识符 / 声明前使用 / 解析错误（见上）。缺的是漏 import 还是拼错的局部名，' +
+    '按名字到对应模块里核对——这正是曾把面板整个 slot 崩掉的那类错误；' +
+    '"used before it was defined" 则是折叠态 TDZ 崩溃的同源形态（1.4.0 的 collDir）。')
   process.exit(1)
 }
-console.log('✓ no-undef 检查通过（' + files.length + ' 个文件）')
+console.log('✓ no-undef / no-use-before-define 检查通过（' + files.length + ' 个文件）')

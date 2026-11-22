@@ -104,6 +104,12 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
   }, [])
   // 折叠/展开滑动动效（见 useCollapseAnimation）：折叠开始前先关 diff 抽屉
   const { collAnim, startCollapse, startExpand } = useCollapseAnimation(() => setDiffSel(null))
+  // 折叠相方向必须在组件顶部就取：下面 native/showDocked 的形态分岔要先读它。
+  // 曾经它只声明在 return 前的渲染段，而 showDocked 的表达式在 s.collapsed 为 true
+  // 时会访问它 —— const 的 TDZ 让整个 GitPanelMain 在挂载期就抛
+  // "Cannot access 'collDir' before initialization"，被 slot 错误边界吞掉后
+  // 表现为「点 Git Panel 毫无反应」（面板收着时 100% 复现，展开态因 || 短路而正常）。
+  const collDir = collAnim ? collAnim.dir : null
   // 扫描请求序列号：丢弃过期响应，防止「初始无 root 的慢扫描」晚到覆盖
   // 「跟随 workspace 的快扫描」的成功结果（竞态会让面板显示错误的空列表）
   const scanSeqRef = React.useRef(0)
@@ -284,7 +290,7 @@ function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
   // 折叠/展开渲染：稳态只渲染一种形态（panelOpen 语义不变，自动刷新轮询继续）；
   // 过渡相内面板与竖条同时在场 —— 离场元素 translateX(100%) 右滑出屏（禁指针），
   // 进场元素从右缘屏外滑入。diff 抽屉在折叠时已关闭（折叠动作里 setDiffSel(null)）。
-  const collDir = collAnim ? collAnim.dir : null
+  // collDir 已提到组件顶部（形态分岔要读），这里只取动画进度。
   const collOn = !!(collAnim && collAnim.entered)
   const panelOff = collDir === 'collapse' ? collOn : collDir === 'expand' ? !collOn : false
   const railOff = collDir === 'collapse' ? !collOn : collDir === 'expand' ? collOn : false

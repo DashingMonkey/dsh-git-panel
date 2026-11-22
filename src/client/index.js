@@ -212,9 +212,12 @@ export default function () {
       slots.inject('sidebar.footer.action', () => slots.register(
         { name: 'sidebar.footer.action', id: 'git-panel-toggle', order: 0, label: () => 'Git Panel' },
         (props) => {
-          if (store.get().toggleHidden) return null
-          const wide = props && props.wide
+          // hook 必须在任何提前 return 之前调用：开关被隐藏时若先 return null 再跳过
+          // useStore，hook 数量会随设置变化（React 报 "Rendered fewer hooks than
+          // expected"），整个 footer 槽位崩溃。先订阅，再决定是否出图。
           const s = useStore()
+          if (s.toggleHidden) return null
+          const wide = props && props.wide
           const nativeOn = s.layout === 'native' && s.panelOpen
           return React.createElement('button', { className: 'gp-sidebar-toggle' + (nativeOn ? ' gp-native-on' : ''), title: tr('toggleTitle'), onClick: () => {
             if (s.layout === 'native') {

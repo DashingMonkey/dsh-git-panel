@@ -58,7 +58,19 @@ scenario('历史图行小字开关（默认关闭）', [
 ])
 
 scenario('左下角按钮可隐藏与重开兜底', [
-  has(R('src/client/index.js'), 'if (store.get().toggleHidden) return null', '槽位在隐藏偏好开启时整体不渲染'),
+  // 隐藏偏好开启时槽位整体不渲染；但 useStore 必须在提前 return **之前**调用 ——
+  // 否则开关切换时 hook 数量变化（React: Rendered fewer hooks than expected），
+  // 整个 footer 槽位崩溃、按钮与面板入口一起消失。
+  (() => {
+    const src = R('src/client/index.js')
+    const start = src.indexOf("id: 'git-panel-toggle'")
+    const end = src.indexOf('const nativeOn', start)
+    const block = start >= 0 && end > start ? src.slice(start, end) : ''
+    const hook = block.indexOf('const s = useStore()')
+    const ret = block.indexOf('if (s.toggleHidden) return null')
+    return { ok: hook >= 0 && ret > hook, msg: 'useStore 先于隐藏态 return（hook 顺序稳定，隐藏开关不崩 footer）' }
+  })(),
+  has(R('src/client/index.js'), 'if (s.toggleHidden) return null', '槽位在隐藏偏好开启时整体不渲染'),
   has(R('src/client/components/GitPanelMain.js'), '(s.toggleHidden && !effectiveOpen)', '隐藏态 dock/overlay 由折叠竖条兜底重开（native 不给，开始页卡片即入口）')
 ])
 
@@ -82,6 +94,16 @@ scenario('开关与页签开合语义', [
 scenario('GitPanelMain 形态门控与抽屉定位', [
   has(R('src/client/components/GitPanelMain.js'), 'const effectiveOpen = nativePane ? true : s.panelOpen', '渲染门控：native 下页签在屏即显示（不看 panelOpen——开始页入口卡片开页签不经 openNativeTab）'),
   has(R('src/client/components/GitPanelMain.js'), 'if (!(nativePane || s.panelOpen)) return', '自动轮询同口径：开始页进入的页签不停摆'),
+  // 折叠态回归守卫：showDocked 在组件顶部读 collDir，它必须在那之前就声明。
+  // 曾把它留在 return 前的渲染段 —— s.collapsed 为真时表达式求值命中 const 的 TDZ，
+  // 整个组件在挂载期抛 "Cannot access 'collDir' before initialization"（slot 错误
+  // 边界吞掉后表现为「点 Git Panel 没反应」；展开态因 || 短路侥幸不触发）。
+  (() => {
+    const src = R('src/client/components/GitPanelMain.js')
+    const decl = src.indexOf('const collDir =')
+    const use = src.indexOf('const showDocked =')
+    return { ok: decl > 0 && use > 0 && decl < use, msg: 'collDir 先于 showDocked 声明（折叠态 TDZ 崩溃守卫）' }
+  })(),
   has(R('src/client/components/GitPanelMain.js'), 'className: \'gp-pane-host\'', 'native 渲染进页签容器'),
   has(R('src/client/components/GitPanelMain.js'), 'className: \'gp-panel\'', '页签内保留 .gp-panel 层（基础样式载体 + native 覆写选择器目标）'),
   // native 下抽屉不再出现（详情一律走新页签），宽度源回归面板宽；实测宽代码已删
