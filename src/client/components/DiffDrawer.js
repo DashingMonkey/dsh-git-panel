@@ -103,7 +103,7 @@ function buildImageBody(img, onZoom) {
   return React.createElement('div', { className: 'gp-img-row' + (cells.length === 1 ? ' gp-img-row-one' : '') }, cells)
 }
 
-function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose }) {
+function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose, fitContainer }) {
   const [state, setState] = React.useState({ loading: true, text: '', error: '' })
   // 分栏（split）视图：左源文件/右修改后；记忆在 localStorage（gp-diff-split）
   const [split, setSplit] = React.useState(() => prefBool('gp-diff-split', false))
@@ -201,7 +201,9 @@ function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose }) {
   const gl = sel.group === 'conflicted' ? { g: 'U', cls: 'gp-g-conflict' } : glyphOf(sel.x, sel.y)
   const { base, dir } = splitPath(sel.path)
   // 面板调宽/窗口变窄时保持抽屉不越过视口左缘
-  const wEff = Math.min(drawerW, Math.max(320, Math.round(window.innerWidth - panelW - 48)))
+  // fitContainer（原生侧栏页签内嵌形态）：宽度不参与定位——CSS 以 inset 铺满容器，
+  // 取极大值只是不让夹取逻辑把宽算小，真正的尺寸交给样式段的 !important 覆写。
+  const wEff = fitContainer ? 100000 : Math.min(drawerW, Math.max(320, Math.round(window.innerWidth - panelW - 48)))
 
   const renderRow = (r, i) => React.createElement('div', { key: i, className: 'gp-diff-row gp-dr-' + r.t },
     React.createElement('span', { className: 'gp-diff-ln' }, r.o == null ? '' : r.o),
@@ -289,11 +291,15 @@ function DiffDrawer({ repo, sel, panelW, onClose, onRequestClose }) {
   // 遮罩是一整块（right: panelW，延伸到本面板下方，由面板滑入后盖住）；
   // 面板只做纯位移（无投影、无透明度动画），起点被 Git Panel 完全遮挡。
   const off = !entered || closing
+  // fitContainer（原生侧栏页签内嵌）：定位**显式内联** inset:0 + position:absolute，
+  // 不赌 body 属性 / CSS 覆写链——那条链任何一环断掉（属性没挂上、CSS 被污染）抽屉就
+  // 退化成 width=100000px 的畸形块，什么都看不到。内联与 CSS 覆写双保险，任一生效即可。
+  const insetStyle = fitContainer ? { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, width: 'auto', height: '100%' } : null
   return React.createElement(React.Fragment, null,
-    React.createElement('div', { className: 'gp-diff-backdrop', style: { right: panelW + 'px', opacity: off ? 0 : 1 }, onClick: requestClose }),
+    React.createElement('div', { className: 'gp-diff-backdrop' + (fitContainer ? ' gp-diff-inpane' : ''), style: fitContainer ? Object.assign({ opacity: off ? 0 : 1 }, insetStyle) : { right: panelW + 'px', opacity: off ? 0 : 1 }, onClick: requestClose }),
     React.createElement('div', {
-      className: 'gp-diff-drawer',
-      style: { right: panelW + 'px', width: wEff + 'px', transform: off ? 'translateX(100%)' : 'none' }
+      className: 'gp-diff-drawer' + (fitContainer ? ' gp-diff-inpane' : ''),
+      style: fitContainer ? Object.assign({ transform: off ? 'translateY(-100%)' : 'none' }, insetStyle) : { right: panelW + 'px', width: wEff + 'px', transform: off ? 'translateX(100%)' : 'none' }
     },
       React.createElement('div', {
         className: 'gp-diff-resize' + (resizing ? ' gp-diff-resize-active' : ''),

@@ -7,6 +7,10 @@ import { pushToast, store, useStore } from '../../store.js'
 import { icon } from '../../icons.js'
 import { GROUP_META, glyphOf, rowKey, splitPath } from '../../lib/util.js'
 import { getMessageDraft, setMessageDraft } from '../../messageDraft.js'
+// 折叠状态记忆（多仓库工作区）：整卡折叠 + 分组展开态按仓库绝对路径记在
+// repoCollapse.js（localStorage 单键，LRU 上限）。卡片卸载重挂时读回，避免每次切换
+// 工作区/会话都要重新摆一遍折叠排版。懒初始化只跑一次，改动后由下方 effect 写回。
+import { getRepoCollapse, setRepoCollapse } from '../../repoCollapse.js'
 import { useMultiSelect } from '../../hooks/useMultiSelect.js'
 import { ConfirmModal } from '../modals.js'
 import { GitGraphView } from '../GitGraphView.js'
@@ -14,7 +18,7 @@ import { CommitArea } from './CommitArea.js'
 import { PushFailModal } from './PushFailModal.js'
 function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
   const [status, setStatus] = React.useState({ loading: true, data: null, error: '' })
-  const [isCollapsed, setCollapsed] = React.useState(false)
+  const [isCollapsed, setCollapsed] = React.useState(() => getRepoCollapse(repo.path).collapsed)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [branchMenu, setBranchMenu] = React.useState({ open: false, loading: false, data: null, error: '', creating: false, newName: '' })
   const [moreMenu, setMoreMenu] = React.useState({ open: false })
@@ -163,9 +167,13 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     if (res && res.ok && !res.summary) res.summary = tr('mergeFinishDone')
     return res
   })
-  // 分组展开/收起（最左侧 chevron）
-  const [groupsOpen, setGroupsOpen] = React.useState({ conflicted: true, staged: true, unstaged: true, untracked: true })
+  // 分组展开/收起（最左侧 chevron）——初值取自该仓库自己的折叠记忆（见 repoCollapse）
+  const [groupsOpen, setGroupsOpen] = React.useState(() => getRepoCollapse(repo.path).groups)
   const toggleGroup = (g) => setGroupsOpen((o) => ({ ...o, [g]: !o[g] }))
+  // 两个排版 state 的**唯一写出口**：任一变化即把全量条目写回该仓库的记忆。
+  // 必须全量打包而非增量补丁——归一器对缺省段按「展开」补，混着旧值增量写会把
+  // 用户显式收起的组又弹回去。
+  React.useEffect(() => { setRepoCollapse(repo.path, { collapsed: !!isCollapsed, groups: groupsOpen }) }, [isCollapsed, groupsOpen])
 
   const openBranchMenu = () => {
     setBranchMenu((b) => ({ ...b, open: !b.open }))
@@ -190,6 +198,13 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
   const totalUnstaged = data ? data.unstaged.length : 0
   const totalUntracked = data ? data.untracked.length : 0
   const totalConflicted = data && data.conflicted ? data.conflicted.length : 0
+  // 「生成」按钮可用性：只要有任何非冲突改动就能生成（有暂存按暂存生成，
+  // 没有则回退到全部未暂存改动，见 CommitArea）。冲突组不计入——冲突文件不是
+  // 可提交的变更，生成也覆盖不到它们；提交仍需 staged，在 CommitArea 内部另行判定。
+  const anyChanges = !!(data && data.staged.length + data.unstaged.length + data.untracked.length > 0)
+  // 一键「暂存并提交」的目标清单：未暂存 ∪ 未跟踪（不含已暂存组）。只在暂存区为空时
+  // 被使用（见 CommitArea.doCommit），混合状态用不上它。
+  const worktreePaths = data ? [].concat(data.unstaged || [], data.untracked || []).map((f) => f.path) : []
   const mergeInProgress = !!(data && data.mergeInProgress)
   // rebase / cherry-pick / revert 进行中（host 只在「有冲突」或「HEAD detached」时探测，
   // 见 repoStatus）：这三者的冲突同样进冲突组，但收尾出口不在面板里，提示条与提交
@@ -436,7 +451,16 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     React.createElement('button', { className: 'gp-btn-icon', onClick: (e) => { e.stopPropagation(); setCollapsed((c) => !c) } }, icon(isCollapsed ? 'chevronRight' : 'chevronDown')),
     React.createElement('span', { className: 'gp-repo-name', title: repo.path }, repo.name),
     data ? React.createElement('span', { className: 'gp-branch' }, icon('branch', 12), data.branch) : null,
-    data && data.aheadBehind ? React.createElement('span', { className: 'gp-count', title: fmt(tr('behindAhead'), { b: data.aheadBehind.behind, a: data.aheadBehind.ahead }) }, icon('arrowDown', 12), data.aheadBehind.behind, ' ', icon('arrowUp', 12), data.aheadBehind.ahead) : null,
+    // ↓↑ 由纯展示计数升级为两个可点击动作区：↓ = Pull（fetch 上游并合并）、↑ = Push
+    // （推送到上游）。与右侧专用 Pull 按钮、⋯ 菜单里的 Push 同级——同样走 runWrite 的
+    // 锁/审计/刷新语义；busy 期间对应一侧换成转圈并禁用；stopPropagation 防止冒泡到整头
+    // 点击（折叠/展开）。无 upstream（aheadBehind 为空）时整组不出。
+    data && data.aheadBehind ? React.createElement(React.Fragment, null,
+      React.createElement('button', { type: 'button', className: 'gp-count gp-sync-btn', title: fmt(tr('syncPullTitle'), { b: data.aheadBehind.behind }), disabled: !!busy, onClick: (e) => { e.stopPropagation(); runWrite('pull', () => callRpc('pull', { repoId: repo.id, sessionId })) } },
+        busy === 'pull' ? React.createElement('span', { className: 'gp-spinner' }) : icon('arrowDown', 12), String(data.aheadBehind.behind)),
+      React.createElement('button', { type: 'button', className: 'gp-count gp-sync-btn', title: fmt(tr('syncPushTitle'), { a: data.aheadBehind.ahead }), disabled: !!busy, onClick: (e) => { e.stopPropagation(); runWrite('push', () => callRpc('push', { repoId: repo.id, sessionId })) } },
+        String(data.aheadBehind.ahead), busy === 'push' ? React.createElement('span', { className: 'gp-spinner' }) : icon('arrowUp', 12))
+    ) : null,
     data && totalStaged > 0 ? React.createElement('span', { className: 'gp-count gp-count-staged', title: fmt(tr('stagedNTitle'), { n: totalStaged }) }, icon('dot', 7), totalStaged) : null,
     // 冲突计数放在三组计数之前：折叠面板时它是唯一还能看见的冲突信号
     data && totalConflicted > 0 ? React.createElement('span', { className: 'gp-count gp-count-conflict', title: fmt(tr('conflictedNTitle'), { n: totalConflicted }) }, icon('warning', 12), totalConflicted) : null,
@@ -459,7 +483,7 @@ function RepoCard({ repo, sessionId, onOpenDiff, diffSel, onCloseDiff }) {
     React.createElement('div', null,
       status.loading ? React.createElement('div', { className: 'gp-empty' }, tr('loadingStatus')) : status.error ? React.createElement('div', { className: 'gp-empty' }, status.error) :
         React.createElement('div', null,
-          React.createElement(CommitArea, { repo, sessionId, stagedPaths, message, setMessage: updateMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus, conflictedCount: totalConflicted, otherOp, pushFail, onPushFail: applyPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }),
+          React.createElement(CommitArea, { repo, sessionId, stagedPaths, worktreePaths, hasChanges: anyChanges, message, setMessage: updateMessage, busy, setBusy, handleWriteResult, refreshStatus: loadStatus, conflictedCount: totalConflicted, otherOp, pushFail, onPushFail: applyPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }),
           data && data.statusError ? React.createElement('div', { className: 'gp-empty gp-danger' }, fmt(tr('gitStatusFailed'), { e: data.statusError })) : null,
           // 冲突提示条：未解决冲突 / 合并进行中 / rebase 等进行中时出现，给出动作说明 + 出口按钮。
           // 「完成合并」只在「合并进行中且冲突已全部解决、暂存为空」时出现——那种状态下解决

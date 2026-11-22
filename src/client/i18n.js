@@ -39,18 +39,22 @@ const TEXTS = {
     graphViewCurrent: '当前分支', graphViewAll: '全部',
     graphViewCurrentTip: '只画当前分支及其上游可达的提交（默认）', graphViewAllTip: '画出所有分支与标签的提交（含备份等旁支）',
     loadingFiles: '加载文件…', commitNoFiles: '该提交无文件变更（合并提交无合并差异）',
-    stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', generated: '已生成提交信息（规则来源：{s}）',
+    stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', noChangesToGenerate: '没有可生成的变更：工作区没有任何改动', generated: '已生成提交信息（规则来源：{s}）',
     ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}', genTimeout: '生成超时，请重试',
     commitFailed: '提交失败: {e}', editRules: '编辑提交规则',
     copyRules: '复制当前生效规则到剪贴板',
+    // 提交详情浮层的哈希行复制（点击整行复制完整哈希）；copyFailed 复用规则编辑器同文键的既有定义
+    copyHashTip: '点击复制完整提交哈希', copiedHash: '已复制完整哈希 {s}',
     effectiveRules: '当前生效：{s}', loading: '读取中…', msgPlaceholder: '提交信息（仅提交已暂存的文件；Ctrl+Enter 提交）',
     genTitle: '生成提交信息', genTitleWithModel: '当前生成模型：{m}',
+    genTitleUnstaged: '暂无暂存：将基于全部未暂存改动（含未跟踪新文件）生成提交信息',
     genModelConfig: '配置生成模型…', genModelFollowDefault: '跟随当前会话模型（默认）',
     genModelEffort: '思考强度', genModelEffortFollow: '跟随模型默认', genModelEffortOff: '关闭思考', genModelEffortHigh: '高', genModelEffortMax: '最大',
+    genModelEffortSession: '跟随会话（当前：{e}）', genModelEffortSessionPlain: '跟随会话',
     genModelSaved: '已保存生成模型', genModelLoadFailed: '读取生成模型/模型列表失败', genModelEmpty: '没有可用模型',
     genModelCurrent: '生成模型: {m}', genModelThinking: '思考: {e}',
     genModelDefaultMark: '（默认）', genModelThinkingParen: '（思考: {e}）', copied: '已复制', copyFailed: '复制失败',
-    stagedCount: '已暂存 {n} 个文件', noStaged: '暂无暂存文件', generate: '生成', generating: '生成中…', rules: '规则',
+    stagedCount: '已暂存 {n} 个文件', noStaged: '暂无暂存文件', noStagedWillGen: '暂无暂存，将基于未暂存改动生成', generate: '生成', generating: '生成中…', rules: '规则',
     genStop: '停止', genStopping: '停止中…', genStopTitle: '终止本次生成（已生成的内容会保留）',
     genStopped: '已停止生成，已生成的内容已保留', genStopTooLate: '生成已完成，未中断',
     genProgress: '生成中 {s}s',
@@ -65,6 +69,8 @@ const TEXTS = {
     pushFailUndoHash: '已撤销提交 {h}',
     pushFailNoHash: '无法确认当前 HEAD，已取消撤销（没有校验就撤销可能撤错提交）。刷新面板后重试即可。',
     commit: '提交', committing: '提交中…', pushing: '推送中…', commitAndPush: '提交并推送',
+    // 一键「暂存并提交」：暂存区为空、工作区有改动时主按钮的原位语义（见 CommitArea.doCommit）
+    commitAll: '暂存并提交', commitAllTitle: '一键把工作区全部改动（未暂存 + 未跟踪新文件）暂存后再提交', commitAndPushAllTitle: '先一键暂存工作区全部改动（含未跟踪），提交后推送当前分支', stageFailed: '暂存失败，请重试',
     titleStageFirst: '先用文件右侧的 + 暂存文件', commitTitle: 'git commit（仅已暂存的 {n} 个文件）', pushTitle: '提交成功后推送当前分支',
     loadingStatus: '读取状态…', statusLoadFailed: '读取状态失败', gitStatusFailed: 'git status 失败：{e}', treeClean: '工作区干净，没有变更',
     unstageAll: '取消暂存全部', stageAll: '暂存全部（{n} 个文件）', unstage: '取消暂存', stage: '暂存（git add）',
@@ -77,6 +83,8 @@ const TEXTS = {
     loadingBranches: '读取分支…', branchesLoadFailed: '读取分支失败', newBranchName: '新分支名', createAndSwitch: '创建并切换',
     newBranch: '新建分支…', moreActions: '更多操作', push: '推送（push）', stashChanges: 'Stash 当前变更',
     stashPop: 'Stash pop（最近一条）', behindAhead: '落后 {b} / 领先 {a}', doneSuffix: '{label}完成', failedSuffix: '{label}失败',
+    // 头部 ↓↑ 动作区：箭头从纯展示改为可点击（Pull / Push），悬停说明写明动作与当前差距
+    syncPullTitle: 'Pull（fetch 上游并合并）· 落后 {b} 个提交', syncPushTitle: 'Push（推送到上游）· 领先 {a} 个提交',
     morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Stash pop（最近一条）',
     moreResetSoft: 'Reset（撤销上次提交，保留更改）', moreResetHard: 'Reset Hard（撤销上次提交并丢弃更改）', moreClean: 'Clean（删除未跟踪文件）',
     resetSoftTitle: 'Soft Reset（HEAD~1）', resetHardTitle: 'Hard Reset（HEAD~1）', cleanTitle: 'Clean 未跟踪文件', dangerRun: '执行',
@@ -112,6 +120,23 @@ const TEXTS = {
     panelSettings: '面板设置',
     modeDock: '侧边栏模式', modeDockDesc: '面板停靠在对话右侧，对话区域自动收窄让位', modeDockBadge: '默认',
     modeOverlay: '浮窗模式', modeOverlayDesc: '面板浮在对话区域上方，不改变对话布局',
+    modeNative: '原生侧栏', modeNativeDesc: '作为 DSH 右侧栏的制表签页签常驻（会话级停靠面），与会话一同收放',
+    gpNativeFailed: '原生侧栏不可用：已打开本面板但制表签服务缺失，请检查插件装载',
+    // 右栏开始页（引导页）入口卡片：标题与描述取自制表签类型注册的 guide 条目
+    gpGuideTitle: 'Git 工作区面板', gpGuideDesc: '暂存 / 提交 / 生成提交信息，跟随当前工作空间',
+    // 生成用量统计（默认关闭）：开关 + 累计行 + 生成进度的 tokens 后缀
+    gpUsageLabel: '生成用量统计',
+    gpUsageOffDesc: '已关闭（默认）：不记录生成消耗的 token',
+    gpUsageToggleOn: '关闭统计', gpUsageToggleOff: '开启统计', gpUsageSaving: '切换中…',
+    gpUsageCumulative: '累计生成 {n} 次 · {t} tokens',
+    // 开关 RPC 失败（宿主半体未重启时不支持这两个方法）：指向可执行的下一步
+    gpUsageRpcFailed: '切换失败：宿主尚未支持此功能——请完全退出并重新打开 DeepSeek Harness 后重试',
+    // 设置 → 隐藏左下角 Git Panel 开关按钮（dock/overlay 由折叠竖条兜底重开，native 由开始页卡片兜底）
+    hideToggleTitle: '隐藏左下角 Git Panel 按钮', hideToggleDesc: '侧栏底部不再显示面板入口开关',
+    // 历史图行右侧小字（作者 · 日期）开关：默认关闭
+    showMetaTitle: '显示历史行日期', showMetaDesc: '提交记录每行右侧显示作者与日期（默认关闭，减少长列表噪音）',
+    // 原生侧栏「变更详情」页签（Git 历史文件点击新开的那一枚）
+    gpDiffTitle: '变更详情', gpDiffEmpty: '无法读取该文件的变更信息',
     layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
   },
   en: {
@@ -137,18 +162,22 @@ const TEXTS = {
     graphViewCurrent: 'Current branch', graphViewAll: 'All',
     graphViewCurrentTip: 'Show commits reachable from the current branch and its upstream (default)', graphViewAllTip: 'Show commits of all branches and tags (including backup branches)',
     loadingFiles: 'Loading files…', commitNoFiles: 'No file changes in this commit (merge without combined diff)',
-    stageFirst: 'Stage files first using the + on the right of each file', generated: 'Commit message generated (rules: {s})',
+    stageFirst: 'Stage files first using the + on the right of each file', noChangesToGenerate: 'Nothing to generate from: the working tree has no changes', generated: 'Commit message generated (rules: {s})',
     ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}', genTimeout: 'Generation timed out, please retry',
     commitFailed: 'Commit failed: {e}', editRules: 'Edit commit rules',
     copyRules: 'Copy effective rules to the clipboard',
+    // Hash-row copy in the commit detail popover (click the row to copy the full hash); copyFailed reuses the rule editor's existing key
+    copyHashTip: 'Click to copy the full commit hash', copiedHash: 'Copied full hash {s}',
     effectiveRules: 'Effective: {s}', loading: 'Loading…', msgPlaceholder: 'Commit message (commits only staged files; Ctrl+Enter to commit)',
     genTitle: 'Generate commit message', genTitleWithModel: 'Generation model: {m}',
+    genTitleUnstaged: 'Nothing staged — will generate from all unstaged changes (incl. untracked files)',
     genModelConfig: 'Configure generation model…', genModelFollowDefault: 'Follow current session model (default)',
     genModelEffort: 'Reasoning effort', genModelEffortFollow: 'Model default', genModelEffortOff: 'Off', genModelEffortHigh: 'High', genModelEffortMax: 'Max',
+    genModelEffortSession: 'Follow session (current: {e})', genModelEffortSessionPlain: 'Follow session',
     genModelSaved: 'Generation model saved', genModelLoadFailed: 'Failed to load generation model / model list', genModelEmpty: 'No models available',
     genModelCurrent: 'Generation model: {m}', genModelThinking: 'thinking: {e}',
     genModelDefaultMark: ' (default)', genModelThinkingParen: ' (thinking: {e})', copied: 'Copied', copyFailed: 'Copy failed',
-    stagedCount: '{n} files staged', noStaged: 'No staged files', generate: 'Generate', generating: 'Generating…', rules: 'Rules',
+    stagedCount: '{n} files staged', noStaged: 'No staged files', noStagedWillGen: 'No staged files; will use unstaged changes', generate: 'Generate', generating: 'Generating…', rules: 'Rules',
     genStop: 'Stop', genStopping: 'Stopping…', genStopTitle: 'Abort this generation (generated content is kept)',
     genStopped: 'Generation stopped; the content produced so far was kept', genStopTooLate: 'Generation already finished; nothing to abort',
     genProgress: 'generating {s}s',
@@ -162,6 +191,8 @@ const TEXTS = {
     pushFailUndoHash: 'Undid commit {h}',
     pushFailNoHash: 'Could not confirm the current HEAD, so the undo was cancelled (undoing without that check could remove the wrong commit). Refresh the panel and try again.',
     commit: 'Commit', committing: 'Committing…', pushing: 'Pushing…', commitAndPush: 'Commit & Push',
+    // One-click path: primary button reads "Stage All & Commit" when nothing is staged (see CommitArea.doCommit)
+    commitAll: 'Stage All & Commit', commitAllTitle: 'Stage every worktree change (unstaged + untracked) and commit them', commitAndPushAllTitle: 'Stage all worktree changes first (incl. untracked), then commit and push the current branch', stageFailed: 'Staging failed, please retry',
     titleStageFirst: 'Stage files first with +', commitTitle: 'git commit (only {n} staged files)', pushTitle: 'Commits, then pushes the current branch',
     loadingStatus: 'Loading status…', statusLoadFailed: 'Failed to load status', gitStatusFailed: 'git status failed: {e}', treeClean: 'Working tree clean',
     unstageAll: 'Unstage All', stageAll: 'Stage All ({n} files)', unstage: 'Unstage', stage: 'Stage (git add)',
@@ -174,6 +205,8 @@ const TEXTS = {
     loadingBranches: 'Loading branches…', branchesLoadFailed: 'Failed to load branches', newBranchName: 'New branch name', createAndSwitch: 'Create & Switch',
     newBranch: 'New Branch…', moreActions: 'More Actions', push: 'Push', stashChanges: 'Stash Changes',
     stashPop: 'Stash Pop (latest)', behindAhead: 'Behind {b} / Ahead {a}', doneSuffix: '{label} completed', failedSuffix: '{label} failed',
+    // Header ↓↑ action zones (pull / push on click); hover text states the action and the gap
+    syncPullTitle: 'Pull (fetch upstream and merge) · {b} commit(s) behind', syncPushTitle: 'Push (to upstream) · {a} commit(s) ahead',
     morePull: 'Pull', morePush: 'Push', moreStash: 'Stash', moreStashPop: 'Pop Latest Stash',
     moreResetSoft: 'Reset (undo last commit, keep changes)', moreResetHard: 'Reset Hard (undo last commit, discard changes)', moreClean: 'Clean (delete untracked files)',
     resetSoftTitle: 'Soft Reset (HEAD~1)', resetHardTitle: 'Hard Reset (HEAD~1)', cleanTitle: 'Clean Untracked Files', dangerRun: 'Run',
@@ -204,6 +237,23 @@ const TEXTS = {
     panelSettings: 'Panel Settings',
     modeDock: 'Side panel', modeDockDesc: 'The panel docks to the right of the conversation, which narrows to make room', modeDockBadge: 'Default',
     modeOverlay: 'Floating overlay', modeOverlayDesc: 'The panel floats above the conversation without changing its layout',
+    modeNative: 'Native sidebar', modeNativeDesc: 'Lives as a tab in DSH\'s right sidebar (a per-session docked surface), expanding and collapsing with the conversation',
+    gpNativeFailed: 'Native sidebar unavailable: the panel is open but its tab service is missing — check plugin loading',
+    // Guide-page (start page) entry card in the right sidebar: title and description come from the guide entry of the tab type registration
+    gpGuideTitle: 'Git workspace panel', gpGuideDesc: 'Stage, commit, and generate commit messages, following the current workspace',
+    // Generation usage accounting (off by default): switch + cumulative row + tokens suffix on generation progress
+    gpUsageLabel: 'Generation usage',
+    gpUsageOffDesc: 'Disabled (default): tokens spent by generations are not recorded',
+    gpUsageToggleOn: 'Disable tracking', gpUsageToggleOff: 'Enable tracking', gpUsageSaving: 'Switching…',
+    gpUsageCumulative: '{n} generations · {t} tokens total',
+    // RPC failure fallback (host half does not support these methods before a restart): point to the actionable next step
+    gpUsageRpcFailed: 'Switch failed: this host build does not support it yet — fully quit and reopen DeepSeek Harness, then retry',
+    // Settings → hide the bottom-left Git Panel toggle (dock/overlay falls back to the collapse rail; native falls back to the guide-page card)
+    hideToggleTitle: 'Hide the bottom-left Git Panel button', hideToggleDesc: 'No panel entry button at the sidebar footer',
+    // Toggle for the per-row author+date suffix in the commit graph (off by default)
+    showMetaTitle: 'Show history row dates', showMetaDesc: 'Each commit row shows author and date on the right (off by default, to reduce long-list noise)',
+    // Native sidebar "change details" tab (the one opened when clicking a git-history file)
+    gpDiffTitle: 'Change details', gpDiffEmpty: 'Could not read change information for this file',
     layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'
   }
 }

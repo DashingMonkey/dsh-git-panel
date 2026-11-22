@@ -217,7 +217,8 @@ export default function () {
           // Client 靠它把「主动终止」与「真失败」分开，绝不能弹成生成失败。
           errGenStopped: '[gen-stopped] 已终止生成',
           errGenModelInvalid: '模型配置无效（缺少 provider 或 model）', errNoRulesHome: '无法定位规则/配置目录',
-          errTimeout: '进程执行超时（{ms}ms）: {c}', noCommits: '无提交', errGenerateNoFiles: '请先暂存文件（生成基于 staged diff）',
+          errTimeout: '进程执行超时（{ms}ms）: {c}', noCommits: '无提交', errGenerateNoFiles: '参数无效：files 应为文件路径数组（暂存区为空时传空数组 = 按全部未暂存改动生成）',
+          errGenerateNoChanges: '没有可生成的变更：暂存区与未暂存改动均为空', genNoStagedNote: '（暂存区为空，以下为工作区全部未暂存的改动，含未跟踪的新文件内容）',
           errBinary: '无法读取文件内容（可能为二进制）', conflictNoContent: '冲突文件在工作区不存在（删除类冲突或二进制文件）',
           errNoYaml: '缺少 yaml', errRules: '规则校验失败: {e}', errNoSys: '缺少 system_prompt 字段', errNoUser: '缺少 user_context 字段',
           errRulesWrite: '写入失败: {p}',
@@ -271,7 +272,8 @@ export default function () {
           // Marker prefix gen-stopped: lets the client tell a user abort apart from a real failure.
           errGenStopped: '[gen-stopped] generation stopped',
           errGenModelInvalid: 'Invalid model configuration (missing provider or model)', errNoRulesHome: 'Cannot locate rules/config directory',
-          errTimeout: 'Process execution timed out ({ms}ms): {c}', noCommits: 'no commits', errGenerateNoFiles: 'Stage files first (generation is based on the staged diff)',
+          errTimeout: 'Process execution timed out ({ms}ms): {c}', noCommits: 'no commits', errGenerateNoFiles: 'Invalid argument: files must be an array of paths (an empty array means generate from all unstaged changes)',
+          errGenerateNoChanges: 'Nothing to generate from: no staged or unstaged changes', genNoStagedNote: '(nothing staged; below are all unstaged worktree changes, including untracked new files)',
           errBinary: 'Cannot read file content (may be binary)', conflictNoContent: 'Conflict file is absent from the worktree (delete/delete conflict or binary file)',
           errNoYaml: 'Missing yaml', errRules: 'Rules validation failed: {e}', errNoSys: 'Missing system_prompt field', errNoUser: 'Missing user_context field',
           errRulesWrite: 'Write failed: {p}',
@@ -1446,6 +1448,127 @@ export default function () {
         return ok({ configured: cfg })
       }
 
+      // ============ 生成用量账（默认关闭，需 genUsage=true 开启）============
+      // 动机：git-panel 直接调 llm.stream 生成提交信息，不走 agent loop、不产生任何会话
+      // 事件，因此会话级 token 统计（如 zcode-usage-stats，只读会话持久化流里的
+      // assistant/message.usage）天然看不到这些消耗。账本把每次生成的 usage 分片累积成
+      // profile 级共享 JSON（$DSH_HOME/git-panel/gen-usage.json，与 rules/logs 同目录），
+      // 作为任何统计工具的潜在数据源。开关存 config.json 的 genUsage 键，缺省 false——
+      // 升级后行为逐字节不变，需在「生成模型配置」弹窗手动开启。
+      async function genUsageConfigPath() {
+        const home = await dshHome()
+        return home ? joinPath(home, 'git-panel', 'config.json') : null
+      }
+      async function genUsageLedgerPath() {
+        const home = await dshHome()
+        return home ? joinPath(home, 'git-panel', 'gen-usage.json') : null
+      }
+      async function loadGenUsageEnabled() {
+        const p = await genUsageConfigPath()
+        if (!p) return false
+        const raw = await fsReadText(p)
+        if (!raw) return false
+        try {
+          const j = JSON.parse(raw)
+          return !!(j && typeof j === 'object' && j.genUsage === true)
+        } catch (e) { return false }
+      }
+      async function saveGenUsageEnabled(enabled) {
+        const p = await genUsageConfigPath()
+        if (!p) return fail(tr('errNoRulesHome'))
+        // 读改写而非盲写：config.json 可能已有其它键，只动 genUsage 一个键
+        let existing = {}
+        const raw0 = await fsReadText(p)
+        if (raw0) { try { existing = JSON.parse(raw0) || {} } catch (e) { /* 损坏按空对象 */ } }
+        existing.genUsage = enabled === true
+        const okW = await writeTextAnywhere(p, JSON.stringify(existing, null, 2) + '\n')
+        if (!okW) return fail(fmt(tr('errRulesWrite'), { p }))
+        return ok({ enabled })
+      }
+      // 本地日期键（与 zcode 的 dateKey 同口径，按机器本地时区折叠）
+      function genUsageDateKey(ms) {
+        const d = new Date(ms)
+        const m = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return d.getFullYear() + '-' + m + '-' + day
+      }
+      // rollup：把一条生成记录并入账本（纯函数、返回新对象不改入参——便于测试钉口径）。
+      // rec.usage 为 null 时只计 calls、token 全 0（adapter 不给 usage 的场景）。
+      // totalTokens 缺失时按 input+output+cacheRead+cacheWrite 兜底求和。
+      function rollupGenUsage(ledger, rec) {
+        const src = (ledger && typeof ledger === 'object' && ledger.days && typeof ledger.days === 'object') ? JSON.parse(JSON.stringify(ledger)) : { version: 1, updatedAt: 0, days: {}, models: {} }
+        const u = rec && rec.usage
+        const input = u && typeof u.inputTokens === 'number' ? u.inputTokens : 0
+        const output = u && typeof u.outputTokens === 'number' ? u.outputTokens : 0
+        const cacheRead = u && typeof u.cacheReadTokens === 'number' ? u.cacheReadTokens : 0
+        const cacheWrite = u && typeof u.cacheWriteTokens === 'number' ? u.cacheWriteTokens : 0
+        const total = u && typeof u.totalTokens === 'number' ? u.totalTokens : input + output + cacheRead + cacheWrite
+        const bump = (b) => {
+          b.calls += 1
+          b.input += input
+          b.output += output
+          b.total += total
+        }
+        const dayKey = genUsageDateKey(rec.at || Date.now())
+        const model = (rec.provider || '') + '/' + (rec.model || 'unknown')
+        const out = { version: 1, updatedAt: rec.at || Date.now(), days: {}, models: {} }
+        for (const k of Object.keys(src.days || {})) out.days[k] = src.days[k]
+        for (const k of Object.keys(src.models || {})) out.models[k] = src.models[k]
+        const dstDay = out.days[dayKey] || (out.days[dayKey] = { calls: 0, input: 0, output: 0, total: 0 })
+        bump(dstDay)
+        const dstModel = out.models[model] || (out.models[model] = { calls: 0, input: 0, output: 0, total: 0 })
+        bump(dstModel)
+        return out
+      }
+      // 汇总视图（供 RPC 返回）：days 按日期升序、models 按总量降序，对齐 zcode 口径的
+      // {date,total,calls} / {model,total,...} 形状，方便任何统计页直接合并。
+      function summarizeGenUsage(data) {
+        const days = []
+        const models = []
+        let calls = 0
+        let input = 0
+        let output = 0
+        let total = 0
+        for (const k of Object.keys((data && data.days) || {}).sort()) {
+          const d = data.days[k]
+          days.push({ date: k, calls: d.calls, input: d.input, output: d.output, total: d.total })
+          calls += d.calls; input += d.input; output += d.output; total += d.total
+        }
+        for (const k of Object.keys((data && data.models) || {}).sort((a, b) => ((data.models[b].total || 0) - (data.models[a].total || 0)))) {
+          const m = data.models[k]
+          models.push({ model: k, calls: m.calls, input: m.input, output: m.output, total: m.total })
+        }
+        return { calls, input, output, total, days, models }
+      }
+      // 账本内存镜像：每进程加载一次（apply 内闭包），写盘失败也不丢本会话的账
+      let genUsageMirrorLoaded = false
+      let genUsageMirror = null
+      async function genUsageData() {
+        if (!genUsageMirrorLoaded) {
+          genUsageMirrorLoaded = true
+          const p = await genUsageLedgerPath().catch(() => null)
+          if (p) {
+            const raw = await fsReadText(p).catch(() => null)
+            if (raw) {
+              try {
+                const j = JSON.parse(raw)
+                if (j && typeof j === 'object' && j.days && typeof j.days === 'object' && j.models && typeof j.models === 'object') genUsageMirror = j
+              } catch (e) { /* 损坏账本按空表处理，历史不可恢复但不影响后续记账 */ }
+            }
+          }
+        }
+        return genUsageMirror
+      }
+      // 记一条生成账：rollup → 更新镜像 → 落盘（写失败静默，内存里的账仍在）。
+      // 只在开关开启时调用（见 runGenerate 的收尾点）。
+      async function recordGenUsage(rec) {
+        const cur = await genUsageData()
+        const next = rollupGenUsage(cur, rec)
+        genUsageMirror = next
+        const p = await genUsageLedgerPath().catch(() => null)
+        if (p) await writeTextAnywhere(p, JSON.stringify(next, null, 2) + '\n').catch(() => { /* 内存兜底 */ })
+      }
+
       async function modelSelection(ignoreConfig) {
         // 优先级：配置的生成模型 → 会话默认模型 → 首个可用 provider/model
         // ignoreConfig=true 时跳过配置（用于返回「跟随当前会话模型」的真实默认）
@@ -1455,7 +1578,7 @@ export default function () {
         if (!sel && defaultModel && typeof defaultModel.currentSelection === 'function') {
           try {
             const s = defaultModel.currentSelection()
-            if (s && s.provider && s.model) sel = { provider: s.provider, model: s.model, reasoningEffort: null }
+            if (s && s.provider && s.model) sel = { provider: s.provider, model: s.model, reasoningEffort: (s.reasoningEffort === 'off' || s.reasoningEffort === 'high' || s.reasoningEffort === 'max') ? s.reasoningEffort : null }
           } catch (e) { /* ignore */ }
         }
         if (!sel && llm) {
@@ -1500,13 +1623,34 @@ export default function () {
 
       // task 由调用方（generate RPC）在**准备 diff 之前**就建好并放进 genTasks，
       // 这样「读 diff 的那几百毫秒~数秒」也处在可终止状态（多文件仓库尤其明显）。
+      //
+      // 生成目标的两条口径：
+      //   - files 非空 = Client 显式给出（通常就是 staged 路径，「暂存即选择」），逐个校验必须
+      //     属于变更集，再按各文件所在组取对应 diff；
+      //   - files 为空 = 「按全部改动生成」——Client 仅在暂存区为空时才发空数组。此时不校验任何
+      //     外部路径，目标直接取自服务端 status 的 staged → unstaged → untracked 三组，
+      //     手工构造的 RPC 也注入不了变更集外的路径。三组都为空才没有可生成的对象。
       async function prepareGenerate(task, repo, files) {
         const rules = await loadEffectiveRules(repo)
-        const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
-        if (!chk.ok) return chk
-        const status = chk.status
+        let status
+        if (files && files.length > 0) {
+          const chk = await checkFilesInGroups(repo, files, ['unstaged', 'untracked', 'staged'], 'errNotChanged')
+          if (!chk.ok) return chk
+          status = chk.status
+        } else {
+          const st = await repoStatus(repo)
+          if (!st.ok) return st
+          status = st
+        }
         const untrackedSet = new Set(status.untracked.map((f) => f.path))
         const stagedSet = new Set(status.staged.map((f) => f.path))
+        let targets = files
+        if (!targets || targets.length === 0) {
+          const all = []
+          for (const g of ['staged', 'unstaged', 'untracked']) for (const f of status[g]) all.push(f.path)
+          if (all.length === 0) return fail(tr('errGenerateNoChanges'))
+          targets = all
+        }
         // 生成上下文预算：120KB（约 40K tokens）足够覆盖常见多文件改动；
         // 单文件 git diff 的 stdout 上限 64KB（超出会自动 spill 后读全，非硬截断）。
         const DIFF_TOTAL_BUDGET = 120 * 1024
@@ -1514,12 +1658,12 @@ export default function () {
         const parts = []
         let total = 0
         let truncatedAny = false
-        for (const f of files) {
+        for (const f of targets) {
           // 逐文件检查终止标志：git diff 是串行的，不检查则 N 个文件都要跑完才停得下来
           if (task.aborted) return fail(tr('errGenStopped'))
           if (total >= DIFF_TOTAL_BUDGET) { truncatedAny = true; break }
           let text
-          if (untrackedSet.has(f)) text = '# 新文件（未跟踪）: ' + f
+          if (untrackedSet.has(f)) text = await untrackedGenText(repo, f)
           else {
             const r = await gitRun(repo.path, stagedSet.has(f) ? ['diff', '--staged', '--', f] : ['diff', '--', f], { maxBytes: DIFF_FILE_MAX, timeoutMs: 60000 })
             text = (r.text || '').trim() || '# 无差异: ' + f
@@ -1539,6 +1683,9 @@ export default function () {
           parts.push(text)
         }
         if (truncatedAny) parts.push('# ……（diff 过长，部分内容已截断）')
+        // 没有任何暂存成分时显式告知模型：上下文里的 diff 不是 staged diff，免得它按
+        // 「已暂存」的假设去描述提交范围
+        if (stagedSet.size === 0) parts.unshift(tr('genNoStagedNote'))
         const sel = await modelSelection()
         if (!sel) return fail(tr('errNoLlm'))
         // modelSelection 里有 listModels 的网络调用，回来后再确认一次用户没在这期间点了停止
@@ -1546,9 +1693,54 @@ export default function () {
         const userCtx = (rules.user_context || '')
           .replaceAll('{repo_name}', repo.name)
           .replaceAll('{branch}', status.branch || '(未知)')
-          .replaceAll('{file_list}', files.map((f) => '- ' + f).join('\n'))
+          .replaceAll('{file_list}', targets.map((f) => '- ' + f).join('\n'))
           .replaceAll('{staged_diff}', parts.join('\n'))
-        return ok({ sel, rules, userCtx })
+        return ok({ sel, rules, userCtx, repoPath: repo.path })
+      }
+
+      // 未跟踪文件的生成上下文：与 fileDiff 的 untracked 分支同一形态——读取内容、合成
+      // 「整份新增」的 unified diff。没有它，无暂存场景下模型只能看到新文件的文件名，对新增
+      // 代码无从描述；有了它，未暂存的新文件也能生成像样的提交信息。二进制 / 目录 / 读取失败
+      // 退回只给名称标记（与旧行为一致的那半）。单文件行数上限让一个大新文件不至于独占整个
+      // 预算，总预算仍由 prepareGenerate 的 120KB 机制兜底。
+      const GEN_UNTRACKED_LINE_CAP = 2000
+      async function untrackedGenText(repo, f) {
+        const fullPath = joinPath(repo.path, f)
+        let target = null
+        try { target = await fs.resolve(fullPath) } catch (e) { /* ignore */ }
+        let info = null
+        try { info = target ? await fs.stat(target) : null } catch (e) { /* ignore */ }
+        if (!info) return '# 新文件（未跟踪，路径已失效）: ' + f
+        if (info.type === 'directory') {
+          // 未跟踪目录：两层条目树（上限 200 条），让模型至少知道新增了哪些路径
+          const lines = []
+          const queue = [{ target, depth: 0 }]
+          let count = 0
+          while (queue.length > 0 && count < 200) {
+            const item = queue.shift()
+            let entries = []
+            try { entries = await fs.listDir(item.target) } catch (e) { continue }
+            for (const entry of entries) {
+              count++
+              if (count > 200) { lines.push('# ……（目录条目过多，已截断）'); break }
+              const rel = String(f).replace(/\/+$/, '') + '/' + entry.name
+              if (entry.type === 'directory') {
+                lines.push('+' + rel + '/')
+                if (item.depth < 2) queue.push({ target: entry.target, depth: item.depth + 1 })
+              } else {
+                lines.push('+' + rel)
+              }
+            }
+            if (count > 200) break
+          }
+          return lines.join('\n').slice(0, 32 * 1024) || '# 新文件（未跟踪目录）: ' + f
+        }
+        const content = await fsReadText(fullPath)
+        if (content === null) return '# 新文件（二进制，读不出内容）: ' + f
+        const allLines = content.split('\n')
+        const capped = allLines.slice(0, GEN_UNTRACKED_LINE_CAP).map((l) => '+' + l).join('\n')
+        const more = allLines.length > GEN_UNTRACKED_LINE_CAP ? '\n# ……（新文件过长，仅前 ' + GEN_UNTRACKED_LINE_CAP + ' 行）' : ''
+        return 'diff --git a/' + f + ' b/' + f + '\nnew file mode 100644\n--- /dev/null\n+++ b/' + f + '\n@@ -0,0 +1,' + Math.min(GEN_UNTRACKED_LINE_CAP, allLines.length) + ' @@\n' + capped + more
       }
 
       async function runGenerate(genId, prep) {
@@ -1565,6 +1757,17 @@ export default function () {
           const st = llm.stream(Object.assign({}, opts, { signal: ac.signal }))
           for await (const chunk of st) {
             if (chunk.type === 'text-delta') { t += chunk.text; if (onDelta) onDelta(t) }
+            // usage 分片（DSH 契约里位于 finish 之前）：仅当用量开关开启时捕获。
+            // 以最后一次为准，与框架 BlockAssembler 同口径；adapter 不给则保持 null。
+            // totalTokens 缺失时当场补算（input+output+cacheRead+cacheWrite），让 poll 与
+            // 客户端拿到的 usage 恒带 total——rollup 的兜底口径与这里保持同一算法。
+            else if (task.captureUsage && chunk.type === 'usage') {
+              const u = chunk.usage || null
+              if (u && typeof u.totalTokens !== 'number') {
+                u.totalTokens = (typeof u.inputTokens === 'number' ? u.inputTokens : 0) + (typeof u.outputTokens === 'number' ? u.outputTokens : 0) + (typeof u.cacheReadTokens === 'number' ? u.cacheReadTokens : 0) + (typeof u.cacheWriteTokens === 'number' ? u.cacheWriteTokens : 0)
+              }
+              task.usage = u
+            }
             else if (chunk.type === 'finish') {
               const kind = chunk.reason && chunk.reason.kind
               if (kind === 'error' || kind === 'aborted') {
@@ -1630,6 +1833,28 @@ export default function () {
           // 走到这里说明 stream 已收尾，controller 不必再对外暴露。
           // （generateCancel 已提前摘走并 abort 过时，这里把 null 写回同一引用也无害）
           task.ac = null
+          // 用量账的单点发射（成功/失败/终止全路径都到这里）：开关开启才记——
+          // rollup + 落盘 + 审计一行 generate-usage（tokensInput/tokensOutput/
+          // tokensTotal/provider/model/ruleSource），全量与账本文件同口径。
+          // 不 await：账本写入与审计串行化都在各自的链上，绝不阻塞任务回收。
+          if (task.captureUsage && !task.usageEmitted) {
+            task.usageEmitted = true
+            recordGenUsage({
+              at: Date.now(),
+              provider: task.provider || '',
+              model: task.model || '',
+              usage: task.usage || null
+            }).catch(() => { /* 内存兜底 */ })
+            audit({
+              op: 'generate-usage', repo: (prep && prep.repoPath) || '',
+              genId, provider: task.provider || '', model: task.model || '',
+              ruleSource: task.ruleSource || '',
+              tokensInput: (task.usage && typeof task.usage.inputTokens === 'number') ? task.usage.inputTokens : 0,
+              tokensOutput: (task.usage && typeof task.usage.outputTokens === 'number') ? task.usage.outputTokens : 0,
+              tokensTotal: (task.usage && typeof task.usage.totalTokens === 'number') ? task.usage.totalTokens : -1,
+              error: ''
+            })
+          }
           if (timer) timer.timeout(() => genTasks.delete(genId), 60000)
         }
       }
@@ -1651,9 +1876,12 @@ export default function () {
       }
 
       // repo 型 RPC 的公共前置：repoId 解析 + 缺失快速失败（约 20 个注册点共用）
+      // reason='repo-missing'：Client 据此触发自愈（重扫当前工作区 + 原参数重试生成），
+      // 不去匹配 errRepoMissing 的文案——那句话随语言切换就失效（与 push-no-upstream 同款约定，
+      // 详见 toEnvelope 的 details.reason 透传与 api.js unwrapRpc 的摊平）。
       const withRepo = (fn) => async (args) => {
         const repo = repoOf(args && args.repoId)
-        if (!repo) return fail(tr('errRepoMissing'))
+        if (!repo) return { ok: false, error: tr('errRepoMissing'), reason: 'repo-missing' }
         return await fn(repo, args)
       }
 
@@ -2285,13 +2513,19 @@ export default function () {
       }
 
       registerRpc('generate', withRepo(async (repo, args) => {
-        if (!args || !Array.isArray(args.files) || args.files.length === 0) return fail(tr('errGenerateNoFiles'))
-        await audit({ op: 'generate', repo: repo.path, files: args.files.length })
+        // files 允许为空数组：= 按全部未暂存改动生成（Client 仅在无暂存文件时才发它，
+        // 「暂存即选择」在暂存区为空时让位给工作区全量改动）。非数组仍是参数错误；
+        // 目标解析与 diff 组装都在 prepareGenerate 内按 status 走，这里不预判三组是否为空。
+        if (!args || !Array.isArray(args.files)) return fail(tr('errGenerateNoFiles'))
+        await audit({ op: 'generate', repo: repo.path, files: args.files.length, mode: args.files.length > 0 ? 'given' : 'worktree-all' })
         // 任务先落地再读 diff：prepareGenerate 期间用户就能终止（它逐文件检查 task.aborted）。
         // Client 拿到 genId 之前会**乐观地**用自己的 genId 调 generateCancel —— 见 client.js
         // 的 doGenerate / genIdRef 注释，两侧必须同时改，否则「提前点停止」会落在空处。
         const genId = genIdFrom(args.clientGenId)
-        const task = { genId, text: '', done: false, error: '', aborted: false, ac: null, ruleSource: '', provider: '', model: '' }
+        const task = { genId, text: '', done: false, error: '', aborted: false, ac: null, ruleSource: '', provider: '', model: '', captureUsage: false, usage: null }
+        // 用量捕获开关：生成发起时读一次盘（热切换对在途任务不追溯——本次任务按发起
+        // 时的状态记账），关闭时消费循环不捕获、poll 的 usage 恒 null。
+        task.captureUsage = await loadGenUsageEnabled().catch(() => false)
         genTasks.set(genId, task)
         const prep = await prepareGenerate(task, repo, args.files.map(String))
         if (!prep.ok) {
@@ -2310,7 +2544,7 @@ export default function () {
         const genId = args && args.genId ? String(args.genId) : ''
         const task = genTasks.get(genId)
         if (!task) return fail(tr('errGenMissing'))
-        const out = ok({ text: liveCleanFence(task.text), done: task.done, error: task.error, aborted: !!task.aborted, ruleSource: task.ruleSource, provider: task.provider, model: task.model })
+        const out = ok({ text: liveCleanFence(task.text), done: task.done, error: task.error, aborted: !!task.aborted, ruleSource: task.ruleSource, provider: task.provider, model: task.model, usage: (task.captureUsage ? task.usage : null) || null })
         if (task.done) genTasks.delete(genId)
         return out
       })
@@ -2368,6 +2602,20 @@ export default function () {
         if (!provider || !model) return fail(tr('errGenModelInvalid'))
         const effort = args.reasoningEffort === 'off' || args.reasoningEffort === 'high' || args.reasoningEffort === 'max' ? args.reasoningEffort : null
         return await saveGenModelConfig({ provider, model, reasoningEffort: effort })
+      })
+
+      // ---- 生成用量账（开关 + 账本读取）----
+      // genUsageGet：开关态 + 汇总（calls/input/output/total + days/models 分布，
+      // 形状对齐 zcode 口径，供任何统计工具直接合并）。genUsageSet：开/关——开启后
+      // 新发生的生成开始累计，关闭后停止写新行，历史账本保留且仍可读。
+      registerRpc('genUsageGet', async () => {
+        const enabled = await loadGenUsageEnabled().catch(() => false)
+        const data = await genUsageData().catch(() => null)
+        return ok(Object.assign({ enabled }, summarizeGenUsage(data)))
+      })
+      registerRpc('genUsageSet', async (args) => {
+        args = args || {}
+        return await saveGenUsageEnabled(args.enabled === true)
       })
 
       registerRpc('models', async () => {

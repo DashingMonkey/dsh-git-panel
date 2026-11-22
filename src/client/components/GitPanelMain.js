@@ -1,6 +1,7 @@
 /** 主面板：扫描、工作空间跟随、拖拽调宽、折叠/展开、dock 同步、卡片与抽屉装配。 */
 import React from 'react'
-import { getClientCtx, getTimer } from '../runtime.js'
+import { getClientCtx, getTimer, takeOverlayHooks } from '../runtime.js'
+import { openNativeDiffTab } from '../nativeDiff.js'
 import { callRpc } from '../api.js'
 import { tr, fmt, applyLocale } from '../i18n.js'
 import { store, savePrefInt, pushToast, useStore } from '../store.js'
@@ -61,14 +62,19 @@ function resolveWorkspace(wsSt, sessSt, hintSessionId) {
   return best
 }
 
-function GitPanelMain({ useSessions, useWorkspaces }) {
+function GitPanelMain({ useSessions, useWorkspaces, paneClose }) {
   const s = useStore()
+  // hook 回退：native 模式的页签正文不携带 slot props（shell.overlay 槽位才有），
+  // 从 runtime.js 暂存的钩子取同一批快照订阅器——两条路径解析出的工作区完全一致。
+  const _hk = takeOverlayHooks()
+  const sessHook = typeof useSessions === 'function' ? useSessions : _hk.useSessions
+  const wsHook = typeof useWorkspaces === 'function' ? useWorkspaces : _hk.useWorkspaces
   // 整快照订阅后由 resolveWorkspace 统一解析（快照对象由 createSnapshotStore 缓存，
   // 内容不变时引用稳定，不会造成额外渲染）。s.currentSessionId 是 shell 当前主区
   // 会话（uiWorkspace.selection 镜像），切换对话即变 → 工作区重解析 → 重扫。
   // sessionId 仅作 RPC 透传元数据（host 不消费），新版 store 已无 current，保持 undefined 即可。
-  const sessSnap = typeof useSessions === 'function' ? useSessions((st) => st) : null
-  const wsSnap = typeof useWorkspaces === 'function' ? useWorkspaces((st) => st) : null
+  const sessSnap = sessHook ? sessHook((st) => st) : null
+  const wsSnap = wsHook ? wsHook((st) => st) : null
   const ws = React.useMemo(() => resolveWorkspace(wsSnap, sessSnap, s.currentSessionId), [wsSnap, sessSnap, s.currentSessionId])
   const sessionId = sessSnap && sessSnap.current ? sessSnap.current : undefined
   const wsPath = ws && ws.path ? ws.path : ''
@@ -86,7 +92,7 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
     setDiffSel((prev) => (prev && prev.closing ? null : prev))
   }, [])
   const [resizing, setResizing] = React.useState(false)
-  // 面板设置弹窗（布局模式 dock/overlay）开关
+  // 面板设置弹窗（布局模式 dock / overlay / native）开关
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   // 停靠窄视口守卫（见 dockActive 计算）：跟踪窗口宽度
   const [innerW, setInnerW] = React.useState(() => (typeof window === 'undefined' ? 9999 : window.innerWidth))
@@ -139,6 +145,19 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
     if (wsPath && wsPath !== scan.root) doScan(wsPath)
   }, [wsPath, scan.root, doScan])
 
+  // 当前工作区根同步进全局 store：CommitArea 的 errRepoMissing 自愈路径要拿它发起
+  // 重扫（跨组件不能引用本组件的 doScan，见 store.js 的 wsRoot 注释）。
+  React.useEffect(() => { store.set((st) => (st.wsRoot === wsPath ? st : { ...st, wsRoot: wsPath })) }, [wsPath])
+
+  // ===== 原生侧栏模式（layout === 'native'）=====
+  // 面板不作为 fixed 覆盖层渲染，而是作为 DSH 右栏制表签页签的页签正文（见 index.js 的
+  // sidebar.right.pane.tab 注册）。这里只负责形态分岔：native 时不渲染停靠/浮层面板，
+  // 把 header + main 装进 .gp-pane-host 容器；其余逻辑（扫描/自动刷新/草稿）全部共用。
+  const nativePane = s.layout === 'native'
+  const showDocked = !nativePane && (!s.collapsed || collDir === 'expand')
+  // paneClose：原生模式点 header 关闭 → 先收起页签（右栏随最后一个页签收起），再清开关态。
+  // 无参（dock/overlay）时维持原样：只改 panelOpen，面板不卸载。
+
   React.useEffect(() => {
     // 面板挂载时重新同步 DSH 语言：apply 阶段 locale 服务可能尚未就绪，
     // 导致初始 lang 固定为 zh、且后续切换事件也没订阅上。
@@ -158,8 +177,10 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
   // 只有这两个字段变化（外部终端里 pull/merge 出冲突正是该场景）；otherOp 同理——
   // rebase 冲突被外部解决后 conflicted 变空、而 rebase 仍在进行，只有它能反映这段过渡。
   const autoFpRef = React.useRef({})
+  // native 下页签在屏即视为打开（同渲染门控口径）：从开始页入口卡片进入的页签
+  // panelOpen 为假，也必须继续轮询，否则状态停摆。
   React.useEffect(() => {
-    if (!s.panelOpen) return
+    if (!(nativePane || s.panelOpen)) return
     // 统一走 timer 服务（动态包沙箱禁用原生 setInterval），链式调度代替轮询定时器
     let stopped = false
     let cancel = null
@@ -198,7 +219,12 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
   // 面板关闭时同步关闭 diff 抽屉，避免下次打开面板时残留上次的 diff 选择
   React.useEffect(() => { if (!s.panelOpen) setDiffSel(null) }, [s.panelOpen])
 
-  if (!s.panelOpen) return null
+  // native 下页签存在即面板在显示：不看 panelOpen——开页签的路径不止我们的开关
+  // （右栏开始页的入口卡片由框架按 kind 直接开页签，不经过 openNativeTab），那条路
+  // 不置 panelOpen，若还拿它当门控就是从开始页进入必空白。panelOpen 在 native 下
+  // 只用于开关按钮的点亮态与切模式时的交接，不参与渲染。
+  const effectiveOpen = nativePane ? true : s.panelOpen
+  if (!effectiveOpen) return null
   const diffRepo = diffSel ? scan.repos.find((r) => r.id === diffSel.repoId) : null
 
   const header = React.createElement('div', { className: 'gp-header' },
@@ -223,8 +249,12 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
           pushToast('error', (r && r.error) || tr('openFolderUnavailable'))
         }).catch(failToast)
       } }, icon('folder')),
-      // 不放关闭按钮：与普通页面右上角的关闭样式混淆，开关统一走侧栏的插件入口（gp-sidebar-toggle）
-      React.createElement('button', { className: 'gp-btn-icon', title: tr('panelSettings'), onClick: () => setSettingsOpen(true) }, icon('gear'))))
+      // 浮层/停靠模式下不放关闭键：与普通页面右上角的关闭样式混淆，开关统一走侧栏入口（gp-sidebar-toggle）。
+      // native 页签模式例外：这里的关闭键语义是「收起这张页签」，由 PaneHost 传入 paneClose。
+      React.createElement('button', { className: 'gp-btn-icon', title: tr('panelSettings'), onClick: () => setSettingsOpen(true) }, icon('gear')),
+      paneClose ? React.createElement('button', { className: 'gp-btn-icon', title: tr('close'), onClick: () => {
+        if (paneClose) { paneClose(); return }
+      } }, icon('close')) : null))
 
   const body = React.createElement('div', { className: 'gp-body' },
     !wsPath ? React.createElement('div', { className: 'gp-empty' }, tr('noWorkspace')) :
@@ -240,9 +270,15 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
             // 普通点击行 = 单选该行并打开 diff；再次点击同一行（同 repo 同组同路径，
             // 提交文件还须同 hash）= 进入关闭相位（抽屉滑出动效播完才卸载，见
             // requestCloseDiff/finishCloseDiff）
-            onOpenDiff: (repo2, f, group) => setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group && (prev.hash || null) === (f.hash || null)
-              ? { ...prev, closing: true }
-              : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y, hash: f.hash || null, short: f.short || '', orig: f.orig || null })
+            // native 下点**任何**分组的文件行都开一枚原生侧栏新页签看变更详情；
+            // 只有 dock/overlay 才走贴面板左缘的本地抽屉。锚进当前页签内部的抽屉会被
+            // 页签本体盖住（用户实测确认），所以 native 从不锚内嵌，一律开页签。
+            onOpenDiff: (repo2, f, group) => {
+              if (s.layout === 'native') { openNativeDiffTab(repo2, f, group); return }
+              setDiffSel((prev) => prev && prev.repoId === repo2.id && prev.path === f.path && prev.group === group && (prev.hash || null) === (f.hash || null)
+                ? { ...prev, closing: true }
+                : { repoId: repo2.id, path: f.path, group, x: f.x, y: f.y, hash: f.hash || null, short: f.short || '', orig: f.orig || null })
+            },
           })))
 
   // 折叠/展开渲染：稳态只渲染一种形态（panelOpen 语义不变，自动刷新轮询继续）；
@@ -271,15 +307,8 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
   const pushOn = dockActive || railPush
   const pushW = dockActive ? s.panelW : (collDir === 'expand' ? 0 : RAIL_W)
 
-  const rail = (s.collapsed || collDir === 'collapse') ? React.createElement('button', {
-    className: 'gp-rail', title: tr('expandTitle'),
-    style: { transform: railOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'expand' ? 'none' : undefined },
-    onClick: startExpand
-  },
-    icon('branch', 16),
-    React.createElement('span', { className: 'gp-rail-label' }, 'Git Panel')) : null
-
-  const panel = (!s.collapsed || collDir === 'expand') ? React.createElement('div', {
+  // native 下不渲染停靠面板/折叠竖条：形态分岔在下方 paneHost 一处完成。
+  const panel = showDocked ? React.createElement('div', {
     className: 'gp-panel' + (resizing ? ' gp-noanim' : ''),
     style: { width: s.panelW + 'px', transform: panelOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'collapse' ? 'none' : undefined }
   },
@@ -291,11 +320,36 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
     header,
     React.createElement('div', { className: 'gp-main' }, body)) : null
 
+  // 隐藏左下角开关后，dock/overlay 的重新打开入口由这条竖条兜底：开关不在、
+  // 面板又收着时，它就是回到面板的唯一把手（native 不给——右栏开始页卡片即入口）。
+  const rail = !nativePane && ((s.collapsed || collDir === 'collapse') || (s.toggleHidden && !effectiveOpen)) ? React.createElement('button', {
+    className: 'gp-rail', title: tr('expandTitle'),
+    style: { transform: railOff ? 'translateX(100%)' : 'none', pointerEvents: collDir === 'expand' ? 'none' : undefined },
+    onClick: startExpand
+  },
+    icon('branch', 16),
+    React.createElement('span', { className: 'gp-rail-label' }, 'Git Panel')) : null
+
+  // 抽屉只在 dock/overlay 出现（贴面板左缘的覆盖层）；native 的详情一律走新页签
+  //（onOpenDiff → openNativeDiffTab）。曾经的「锚进当前页签内部」方案已废弃：
+  // 那层抽屉会被页签本体盖住，用户看到的是点击无反应。
+  const drawerW = s.panelW
+
+  // 原生侧栏页签正文容器（styles.js 的 native 段覆写其内部 .gp-panel 的定位与宽度）。
+  // 结构必须保留 .gp-panel 这层：基础样式（底色/左边框/字号）都挂在它身上，native
+  // 段只负责「去 fixed、宽满容器」的覆写——少了这层选择器就是死代码，面板没有底色。
+  // 不放左缘拖拽手柄：侧栏宽度由 DSH 自身的边缘手势管理，重复的手柄会与它冲突。
+  const paneHost = nativePane ? React.createElement('div', { className: 'gp-pane-host' },
+    React.createElement('div', { className: 'gp-panel' },
+      header,
+      React.createElement('div', { className: 'gp-main' }, body))) : null
+
   return React.createElement(React.Fragment, null,
     React.createElement(DockSync, { on: pushOn, w: pushW, noanim: resizing }),
     panel,
     rail,
+    paneHost,
     settingsOpen ? React.createElement(LayoutSettingsModal, { onClose: () => setSettingsOpen(false) }) : null,
-    diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: s.panelW, onClose: finishCloseDiff, onRequestClose: requestCloseDiff }) : null)
+    !nativePane && diffSel && diffRepo ? React.createElement(DiffDrawer, { repo: diffRepo, sel: diffSel, panelW: drawerW, onClose: finishCloseDiff, onRequestClose: requestCloseDiff }) : null)
 }
 export { GitPanelMain }

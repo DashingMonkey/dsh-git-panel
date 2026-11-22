@@ -142,7 +142,7 @@ body[data-ds-dark-theme] .gp-btn-primary { color: #16181d; text-shadow: none; }
 .gp-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; corner-shape: round; animation: gp-spin .8s linear infinite; }
 @keyframes gp-spin { to { transform: rotate(360deg); } }
 .gp-repo-card { background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--gp-border-1); border-radius: 8px; margin-bottom: 8px; }
-.gp-repo-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; cursor: pointer; user-select: none; }
+.gp-repo-head { display: flex; align-items: center; gap: 9px; padding: 8px 10px; cursor: pointer; user-select: none; }
 .gp-repo-name { font-weight: 600; color: var(--dsw-alias-brand-primary); font-size: 14px; cursor: default; }
 .gp-branch { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--gp-border-2); color: var(--dsw-alias-label-secondary); white-space: nowrap; }
 .gp-count { font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
@@ -151,6 +151,11 @@ body[data-ds-dark-theme] .gp-btn-primary { color: #16181d; text-shadow: none; }
 .gp-count-untracked { color: var(--dsw-alias-brand-primary); }
 /* 冲突计数：与提示条同色系，收起/折叠状态下也能一眼看出仓库处于冲突中 */
 .gp-count-conflict { color: var(--dsw-alias-state-warn-primary); font-weight: 600; }
+/* ↓↑ 动作区（RepoCard 头部）：外观继承 .gp-count，只补按钮交互态与点击热区，
+   hover 高亮、禁用退明度（与 .gp-btn-icon 同款语言）。 */
+.gp-sync-btn { border: none; background: transparent; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
+.gp-sync-btn:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.gp-sync-btn:disabled { opacity: .4; cursor: not-allowed; }
 .gp-spacer { flex: 1; }
 .gp-menu-wrap { position: relative; }
 .gp-menu { position: absolute; right: 0; top: calc(100% + 4px); background: var(--gp-pop-bg); border: 1px solid var(--gp-border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); z-index: 120; min-width: 250px; padding: 4px; }
@@ -229,7 +234,12 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
    3px 不影响下面的输入框，is-generating 类只在生成期间挂上。 */
 .gp-commit-area.gp-generating::before { content: ''; display: block; height: 2px; margin: -9px -10px 7px; background: linear-gradient(90deg, transparent, var(--dsw-alias-brand-primary), transparent); background-size: 45% 100%; background-repeat: no-repeat; animation: gp-sweep 1.35s linear infinite; }
 @keyframes gp-sweep { from { background-position: -45% 0; } to { background-position: 145% 0; } }
-.gp-textarea { width: 100%; resize: none; border: 1px solid var(--gp-border-2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); padding: 7px 9px; font-size: 13px; line-height: 1.5; font-family: inherit; min-height: 58px; max-height: 138px; }
+/* 提交信息输入框：内容驱动的自动撑高（CommitArea 的 rows=lineCount，2~6 行封顶）
+   由 min/max-height 收口），同时允许用户按住右下角手柄垂直拖拽调高——短消息时
+   不占地方，长正文（如多要点提交说明）不用折叠就能看全。拖过的显式高度优先于
+   rows 自动口径，拖到上限内后内部滚动；min-height 与默认行数对应，保持紧凑基线。
+   max-height 上限取 300px：再大就把提交区顶出卡片、挤压下方文件列表。 */
+.gp-textarea { width: 100%; resize: vertical; border: 1px solid var(--gp-border-2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); padding: 7px 9px; font-size: 13px; line-height: 1.5; font-family: inherit; min-height: 58px; max-height: 300px; }
 .gp-textarea:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .gp-commit-row { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; gap: 8px; }
 .gp-left-group { display: flex; gap: 6px; align-items: center; }
@@ -323,6 +333,12 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
 body[data-ds-dark-theme] .gp-cd-ref-remote { color: #c4b5fd; border-color: rgba(196,181,253,.5); background: rgba(196,181,253,.12); }
 .gp-cd-ref-tag { color: var(--dsw-alias-state-warn-primary); border-color: rgba(215,166,72,.5); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 50%, transparent); background: rgba(215,166,72,.10); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); }
 .gp-cd-hashrow { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+/* 哈希行复制入口（提交详情浮层）：整行可点，hover 高亮给「这里能点」的视觉提示，
+   与 .gp-btn-icon 的底色语言同款；短哈希与剪贴板图标并排。 */
+.gp-cd-hashrow.gp-hash-copy { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 6px; border-radius: 5px; max-width: 100%; }
+.gp-cd-hashrow.gp-hash-copy:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.gp-cd-hashrow.gp-hash-copy:active { background: var(--dsw-alias-interactive-bg-hover); }
+.gp-cd-hashrow .gp-cd-hash { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* ===== Diff 查看器：从面板左缘滑出的浮层抽屉（z 层级低于面板菜单/模态/通知） ===== */
 .gp-diff-backdrop { position: fixed; top: 0; bottom: 0; left: 0; background: rgba(0,0,0,.22); z-index: 54; pointer-events: auto; transition: opacity .22s cubic-bezier(.2,.8,.2,1); }
 /* 面板不带头影：深度感由整块遮罩提供（遮罩延伸到面板下方，面板滑入盖住它）。
@@ -400,6 +416,11 @@ body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected { color: #16181d
 body[data-ds-dark-theme] .gp-genmodel-item.gp-genmodel-selected .gp-genmodel-meta { color: rgba(22,24,29,.72); }
 .gp-genmodel-effort { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--gp-border-1); flex-wrap: wrap; }
 .gp-genmodel-effort-label { font-size: 12px; color: var(--dsw-alias-label-secondary); margin-right: 4px; }
+.gp-genmodel-effort-follow { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+/* 生成用量区（GenModelModal 底部）：标签 + 状态/累计行 + 开合按钮，与 effort 行同款观感 */
+.gp-genmodel-usage { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--gp-border-1); flex-wrap: wrap; }
+.gp-genmodel-usage .gp-btn-sm { margin-left: auto; }
+.gp-usage-on-text { color: var(--dsw-alias-state-success-primary); }
 .gp-modal-head { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--gp-border-1); font-weight: 600; font-size: 14px; }
 .gp-modal-body { flex: 1; overflow: auto; padding: 12px 14px; }
 .gp-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 11px 14px; border-top: 1px solid var(--gp-border-1); }
@@ -521,8 +542,44 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
 .gp-layout-opt-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .gp-layout-opt-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .gp-layout-opt-desc { font-size: 12px; color: var(--dsw-alias-label-secondary); line-height: 1.5; }
+/* 「隐藏左下角开关」独立开关行：外观与布局单选卡一致，但勾选位是方形勾选框
+   （对勾用两条旋转边框拼出，不引入图标资源）。 */
+.gp-toggle-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--gp-border-2); border-radius: 8px; padding: 11px 12px; cursor: pointer; color: var(--dsw-alias-label-primary); font-size: 13px; margin-top: 12px; font-family: inherit; }
+.gp-toggle-opt:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.gp-toggle-on { border-color: var(--dsw-alias-brand-primary); }
+.gp-toggle-box { flex: none; width: 15px; height: 15px; border-radius: 4px; corner-shape: round; border: 1.5px solid var(--gp-border-2); margin-top: 2px; position: relative; transition: border-color .12s ease; background: transparent; }
+.gp-toggle-on .gp-toggle-box { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-brand-primary); }
+.gp-toggle-on .gp-toggle-box::before { content: ''; position: absolute; left: 3.5px; top: 1.5px; width: 4.5px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(38deg); }
 .gp-layout-default-badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 7px; border: 1px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); flex: none; line-height: 1.6; }
 .gp-layout-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; margin: 6px 0 0; }
+/* ===== 原生侧栏模式（native）：面板成为 DSH 右栏制表签页的页签正文 =====
+   body[data-gp-layout='native'] 由 apply 在布局模式为 native 时挂到 <html> 上。
+   .gp-pane-host 是页签正文的容器（sidebar.right.pane.tab 的直接子元素，面板在
+   其内部）：高度 100%、纵向布局。内部 .gp-panel 不再是 fixed 覆盖层——覆写其
+   固定定位与宽度，让它成为普通文档流的整块（宽=容器宽）。diff 抽屉按「贴容器
+   左缘」重定位：inline right 属性被 !important 压掉，遮罩铺满整窗。 */
+body[data-gp-layout='native'] .gp-pane-host { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; position: relative; }
+body[data-gp-layout='native'] .gp-pane-host > .gp-panel {
+  position: static; top: auto; right: auto; bottom: auto; left: auto;
+  width: 100%; max-width: none; transform: none; transition: none;
+  box-shadow: none; border-left: 1px solid var(--gp-border-1);
+  /* ⚠ 高度必须由页签容器决定：去掉 fixed 后若高度仍是 auto，.gp-main / .gp-body 的
+     flex+overflow 滚动链全部失去「确定高度」前提，长列表超出部分会被外层
+     .gp-pane-host 的 overflow:hidden 直接裁掉——底部卡片不可见且滚不动（本轮实测故障）。 */
+  height: 100%; flex: 1 1 auto; min-height: 0;
+}
+/* 「变更详情」原生页签（git-diff kind）正文的容器：native 下点任何分组的文件行都开这枚
+   页签，正文由 DiffPaneHost 渲染、DiffDrawer 以 fitContainer 铺满。定位双保险——
+   组件内显式内联 inset + 下方 CSS 覆写，任一生效即正确显示。
+   曾试过把详情锚进 Git Panel 页签内部，已废弃：那层会被页签本体盖住。 */
+.gp-diff-panewrap { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.gp-diff-panewrap .gp-diff-backdrop,
+.gp-diff-panewrap .gp-diff-drawer {
+  position: absolute !important; top: 0 !important; bottom: 0 !important;
+  left: 0 !important; right: 0 !important; width: auto !important; height: 100% !important;
+}
+/* 原生模式下侧栏底部开关点亮（面板打开即 tab 可见），作为「此刻开在原生侧栏」的指示 */
+.gp-sidebar-toggle.gp-native-on { color: var(--dsw-alias-brand-primary); }
 `
 
 export { injectCss }

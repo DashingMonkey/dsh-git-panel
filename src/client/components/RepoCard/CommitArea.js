@@ -1,4 +1,5 @@
-/** 提交区：生成（含终止/进度）、提交、提交并推送，仅处理已暂存（staged）文件。
+/** 提交区：生成（含终止/进度）、提交、提交并推送。生成在暂存区为空时回退到全部未暂存改动；
+ *  （未暂存 diff + 未跟踪新文件内容）；提交与提交并推送仍只处理已暂存（staged）文件。
  *  推送失败现场只经 onPushFail/onPushRetryFail 上报（状态由 RepoCard 持有）。 */
 import React from 'react'
 import { callRpc, isPushNoUpstream } from '../../api.js'
@@ -6,14 +7,20 @@ import { tr, fmt } from '../../i18n.js'
 import { getTimer } from '../../runtime.js'
 import { pushToast, store } from '../../store.js'
 import { icon } from '../../icons.js'
+import { fmtTokens } from '../../lib/util.js'
 import { RuleEditorModal } from '../RuleEditorModal.js'
 import { GenModelModal } from '../GenModelModal.js'
-// 提交区：仅处理已暂存（staged）文件——生成 / 提交 / 提交并推送都基于 stagedPaths。
+// 提交区：提交 / 提交并推送默认只处理已暂存（staged）文件，「暂存即选择」；
+// worktreePaths（未暂存 ∪ 未跟踪）用于两条回退路径：
+//   - 「✦ 生成」在暂存区为空时按全部未暂存改动解析（见 doGenerate 的空 files 口径）；
+//   - stagedPaths 为空但 worktreePaths 非空时，主按钮原位变为「暂存并提交」一键路径
+//     ——先把工作区全部改动一次暂存、再用同一份清单提交（可选追加推送），见 doCommit。
+// hasChanges 决定「生成」是否可用：任何非冲突改动存在就能生成。
 // conflictedCount > 0 时提交按钮禁用：git 自己也会拒绝（"Committing is not possible
 // because you have unmerged files"，实测 exit 128），面板提前把原因写在按钮提示里。
 // otherOp 不拦提交（实测 rebase / cherry-pick 冲突解决后 git 接受该提交并据此收尾），
 // 只在提示里说明它会成为该操作的提交、并替换掉原提交信息。
-function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus, conflictedCount, otherOp, pushFail, onPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }) {
+function CommitArea({ repo, sessionId, stagedPaths, worktreePaths, hasChanges, message, setMessage, busy, setBusy, handleWriteResult, refreshStatus, conflictedCount, otherOp, pushFail, onPushFail, onPushRetryFail, getPushRetryToken, isPushRetryStale, pushRetrying, setPushRetrying, pushFailActions }) {
   const [rulesMenuOpen, setRulesMenuOpen] = React.useState(false)
   const [rulesInfo, setRulesInfo] = React.useState(null)
   const [openRules, setOpenRules] = React.useState(false)
@@ -30,8 +37,9 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
           label = cfg.model
           if (cfg.reasoningEffort) label += fmt(tr('genModelThinkingParen'), { e: cfg.reasoningEffort === 'off' ? tr('genModelEffortOff') : cfg.reasoningEffort === 'high' ? tr('genModelEffortHigh') : tr('genModelEffortMax') })
         } else if (eff) {
-          // 跟随会话默认：模型名 + （默认）标记
+          // 跟随会话默认：模型名 + （默认）+ 会话思考强度标记
           label = eff.model + tr('genModelDefaultMark')
+          if (eff.reasoningEffort) label += fmt(tr('genModelThinkingParen'), { e: eff.reasoningEffort === 'off' ? tr('genModelEffortOff') : eff.reasoningEffort === 'high' ? tr('genModelEffortHigh') : tr('genModelEffortMax') })
         } else {
           label = '-' + tr('genModelDefaultMark')
         }
@@ -103,7 +111,9 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
     genIdRef.current = null
     if (id) cancelGen(id, null, null, () => false)
   }, [])
-  const canCommit = message.trim() !== '' && stagedPaths.length > 0 && busy === null && !conflictedCount
+  // 有暂存 → 常规口径（只提交已暂存）；没有暂存但工作区有改动 → 一键「暂存全部 + 提交」
+  // 也放行（条件见 doCommit）；工作区完全干净且消息非空才可点。
+  const canCommit = message.trim() !== '' && busy === null && !conflictedCount && (stagedPaths.length > 0 || worktreePaths.length > 0)
   const lineCount = Math.min(6, Math.max(2, (message.match(/\n/g) || []).length + 1))
 
   const doGenerate = async () => {
@@ -121,18 +131,49 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
     // 不合规会自己另生成，那时的提前取消会退化成「停止中…直到有结果」而不是误中断）。
     genIdRef.current = 'gen-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
     try {
-      // 生成前先刷新仓库状态：生成基于 staged diff，必须用最新的 staged 文件列表
-      //（外部改动/自动刷新延迟可能让面板列表过期，导致漏掉刚暂存或带上已取消暂存的文件）。
+      // 生成前先刷新仓库状态，用最新变更集决定发送口径：
+      //   - 有暂存 → 发 staged 路径（生成基于 staged diff，「暂存即选择」）；
+      //   - 无暂存但工作区有改动 → 发空数组，Host 按「全部未暂存改动」解析
+      //     （未暂存 diff + 未跟踪新文件内容）；
+      //   - 三组全空 → 没有可生成的对象，toast 后放弃。
+      // 必须用最新状态：外部改动/自动刷新延迟可能让面板列表过期，导致漏掉刚暂存的
+      // 文件（或带上已取消暂存的文件）。
       let paths = stagedPaths
       try {
         const st = await callRpc('status', { repoId: repo.id })
-        if (st && st.ok && Array.isArray(st.staged)) {
-          paths = st.staged.map((f) => f.path)
+        if (st && st.ok) {
+          const all = [].concat(st.staged || [], st.unstaged || [], st.untracked || [])
+          if (all.length === 0) { pushToast('error', tr('noChangesToGenerate')); return }
+          paths = st.staged && st.staged.length > 0 ? st.staged.map((f) => f.path) : []
           if (refreshStatus) refreshStatus()
         }
-      } catch (e) { /* 刷新失败时退用面板现有列表 */ }
-      if (paths.length === 0) { pushToast('error', tr('stageFirst')); return }
-      const r = await callRpc('generate', { repoId: repo.id, files: paths, clientGenId: genIdRef.current })
+      } catch (e) { /* 刷新失败时退用面板现有列表（空则交由 Host 判定无变更） */ }
+      // errRepoMissing 自愈配额：整个 doGenerate 只允许「重扫 + 原参数重试」一次，绝不递归。
+      let rescanAllowed = true
+      // 自愈重试时换用的仓库记录（重扫结果里按 id/path 匹配到的同一仓库）；常规路径
+      // activeRepo === repo，下面的发送点统一读 activeRepo.id。
+      let activeRepo = repo
+      const sendGenerate = () => callRpc('generate', { repoId: activeRepo.id, files: paths, clientGenId: genIdRef.current })
+      let r = await sendGenerate()
+      if (!(r && r.ok) && rescanAllowed && r && r.reason === 'repo-missing') {
+        // 仓库不在该后端的注册表里：注册表只保留最近一次扫描的工作区，而页面上这张卡片是
+        // 客户端旧列表——多个 Harness 窗口并存 / 工作区切换后，点到的 id 与表不符。对策：
+        // 不打扰用户，直接重扫当前工作区根对齐注册表、校验到同一仓库后原参数重试一次。
+        //   - 走共享 store 的 wsRoot + scan RPC 自给自足，不引用 GitPanelMain 的 doScan
+        //     （跨组件局部函数引用是本项目的 ReferenceError 高发区）；
+        //   - host 那次 generate 任务根本没建成（withRepo 先于建任务返回），重试换新 genId
+        //     幂等安全；
+        //   - 拿不到根 / 扫描失败 / 仓库不在结果里 → 按普通生成失败收尾，用原错误文案。
+        rescanAllowed = false
+        const wsRoot = store.get().wsRoot
+        const sr = wsRoot ? await callRpc('scan', { root: wsRoot, force: true }).catch(() => null) : null
+        const hit = sr && sr.ok ? (sr.repos || []).find((x) => x.id === activeRepo.id || x.path === activeRepo.path) : null
+        if (hit) {
+          activeRepo = hit
+          genIdRef.current = 'gen-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+          r = await sendGenerate()
+        }
+      }
       if (!(r && r.ok)) {
         // Host 在准备 diff 阶段被终止：错误串里带 gen-stopped 标记。这时**不能**弹生成失败
         // —— doCancelGenerate 已经/即将弹出「已停止」，再弹一个红色错误就是自相矛盾。
@@ -171,7 +212,10 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
           continue
         }
         setMessage(p.text || '')
-        setGenProgress(fmt(tr('genProgress'), { s: Math.round((Date.now() - genStartRef.current) / 1000), n: (p.text || '').length }))
+        // 用量开关开启且 adapter 给出 usage 时，存活指示追加 tokens 后缀（k/M 格式化）；
+        // 关闭态或 adapter 不给 usage 时不显示任何 token 字样。
+        const tokPart = (p && p.usage && p.usage.totalTokens != null) ? ' · ' + fmtTokens(p.usage.totalTokens) + ' tokens' : ''
+        setGenProgress(fmt(tr('genProgress'), { s: Math.round((Date.now() - genStartRef.current) / 1000), n: (p.text || '').length }) + tokPart)
         // 已经收尾（含被终止）就别再转圈了：存活指示只在 host 说「还没完」时为真
         if (p.aborted || p.done || p.error) setGeneratingNow(false)
         // aborted 是 host 确认过的终态：用户主动点击造成的中断走这条，绝不出红色报错。
@@ -230,9 +274,24 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
 
   const doCommit = async (pushAfter) => {
     if (!canCommit) return
+    // 一键「暂存并提交」路径：暂存区为空但工作区有改动时，先把全部未暂存 ∪ 未跟踪
+    // 文件一次暂存（Host 的 stage 覆盖两个组），再用**同一份清单**提交；混合状态
+    // （index 里已有别的东西）不走这条路——那是「暂存即选择」的常规口径，提交范围
+    // 不会被悄悄扩大。
+    let files = stagedPaths
+    if (files.length === 0 && worktreePaths.length > 0) {
+      const sr = await callRpc('stage', { repoId: repo.id, files: worktreePaths.slice(), sessionId })
+      if (!(sr && sr.ok)) {
+        // 暂存失败就到此为止：不进提交（stage 与 commit 之间的每道校验都在 Host 侧，
+        // 这里提前退出只是不让用户看到一条更晚出现的报错）。
+        pushToast('error', (sr && sr.error) || tr('stageFailed'))
+        return
+      }
+      files = worktreePaths.slice()
+    }
     setBusy(pushAfter ? 'push' : 'commit')
     try {
-      const r = await callRpc('commit', { repoId: repo.id, files: stagedPaths, message, sessionId })
+      const r = await callRpc('commit', { repoId: repo.id, files, message, sessionId })
       const out = handleWriteResult(r, 'COMMIT')
       if (pushAfter && out === 'ok') {
         // 推送失败弹窗要说清「本地多了哪个提交、在哪个分支上」：
@@ -385,7 +444,7 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
           ? React.createElement('button', { className: 'gp-btn gp-stop-btn', onClick: doCancelGenerate, disabled: cancelling, title: tr('genStopTitle') },
             cancelling ? React.createElement('span', { className: 'gp-spinner' }) : icon('stop'),
             cancelling ? tr('genStopping') : tr('genStop'))
-          : React.createElement('button', { className: 'gp-btn', onClick: doGenerate, disabled: busy !== null || stagedPaths.length === 0, title: genModel ? fmt(tr('genTitleWithModel'), { m: genModel }) : tr('genTitle') },
+          : React.createElement('button', { className: 'gp-btn', onClick: doGenerate, disabled: busy !== null || !hasChanges, title: genModel ? fmt(tr('genTitleWithModel'), { m: genModel }) : (stagedPaths.length > 0 ? tr('genTitle') : tr('genTitleUnstaged')) },
             icon('sparkles'), tr('generate')),
         React.createElement('div', { className: 'gp-menu-wrap' },
           React.createElement('button', { className: 'gp-btn', onClick: () => { setRulesMenuOpen((o) => !o); if (!rulesMenuOpen) loadRulesInfo() } }, icon('gear'), tr('rules') + ' ', icon('chevronDown', 11)),
@@ -402,12 +461,17 @@ function CommitArea({ repo, sessionId, stagedPaths, message, setMessage, busy, s
           ? React.createElement('span', { className: 'gp-gen-progress' }, React.createElement('span', { className: 'gp-spinner' }), genProgress)
           : null,
         generatingNow ? React.createElement('span', { className: 'gp-gen-sep' }, '·') : null,
-        stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : tr('noStaged'))),
+        // 有暂存时报「已暂存 N 个文件」；无暂存但有其他改动时改报「将基于未暂存改动生成」，
+        // 免得用户以为「生成没反应」或误以为必须先暂存；工作区完全干净才显示「暂无暂存文件」
+        (stagedPaths.length > 0 ? fmt(tr('stagedCount'), { n: stagedPaths.length }) : (hasChanges ? tr('noStagedWillGen') : tr('noStaged'))))),
     React.createElement('div', { className: 'gp-commit-actions' },
-      React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: () => doCommit(false), disabled: !canCommit, title: conflictedCount > 0 ? fmt(tr('titleResolveFirst'), { n: conflictedCount }) : otherOp ? fmt(tr('titleOtherOp'), { op: otherOp }) : stagedPaths.length === 0 ? tr('titleStageFirst') : fmt(tr('commitTitle'), { n: stagedPaths.length }) },
+      // 一键态（暂存区为空、工作区有改动）：主按钮原位变「暂存并提交」，文案与提示
+      // 都写明这一步会先把全部改动（含未跟踪）暂存再提交；常规态保持「✓ 提交」。
+      // 与生成按钮同一手法：单一按钮原位换语义，不出现第二个按钮挤占行宽。
+      React.createElement('button', { className: 'gp-btn gp-btn-primary', onClick: () => doCommit(false), disabled: !canCommit, title: conflictedCount > 0 ? fmt(tr('titleResolveFirst'), { n: conflictedCount }) : otherOp ? fmt(tr('titleOtherOp'), { op: otherOp }) : (stagedPaths.length === 0 && worktreePaths.length > 0) ? tr('commitAllTitle') : stagedPaths.length === 0 ? tr('titleStageFirst') : fmt(tr('commitTitle'), { n: stagedPaths.length }) },
         busy === 'commit' ? React.createElement('span', { className: 'gp-spinner' }) : icon('check'),
-        busy === 'commit' ? tr('committing') : tr('commit')),
-      React.createElement('button', { className: 'gp-btn', onClick: () => doCommit(true), disabled: !canCommit, title: tr('pushTitle') },
+        busy === 'commit' ? tr('committing') : (stagedPaths.length === 0 && worktreePaths.length > 0) ? tr('commitAll') : tr('commit')),
+      React.createElement('button', { className: 'gp-btn', onClick: () => doCommit(true), disabled: !canCommit, title: (stagedPaths.length === 0 && worktreePaths.length > 0) ? tr('commitAndPushAllTitle') : tr('pushTitle') },
         busy === 'push' ? React.createElement('span', { className: 'gp-spinner' }) : icon('arrowUp'),
         busy === 'push' ? tr('pushing') : tr('commitAndPush'))),
     rulesMenuOpen ? React.createElement('div', { className: 'gp-menu-backdrop', onClick: (e) => { e.stopPropagation(); setRulesMenuOpen(false) } }) : null,
