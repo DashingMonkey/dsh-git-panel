@@ -223,8 +223,8 @@ function GitPanelMain({ useSessions, useWorkspaces }) {
           pushToast('error', (r && r.error) || tr('openFolderUnavailable'))
         }).catch(failToast)
       } }, icon('folder')),
-      React.createElement('button', { className: 'gp-btn-icon', title: tr('panelSettings'), onClick: () => setSettingsOpen(true) }, icon('gear')),
-      React.createElement('button', { className: 'gp-btn-icon', title: tr('close'), onClick: () => store.set((st) => ({ ...st, panelOpen: false })) }, icon('close'))))
+      // 不放关闭按钮：与普通页面右上角的关闭样式混淆，开关统一走侧栏的插件入口（gp-sidebar-toggle）
+      React.createElement('button', { className: 'gp-btn-icon', title: tr('panelSettings'), onClick: () => setSettingsOpen(true) }, icon('gear'))))
 
   const body = React.createElement('div', { className: 'gp-body' },
     !wsPath ? React.createElement('div', { className: 'gp-empty' }, tr('noWorkspace')) :

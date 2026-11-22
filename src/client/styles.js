@@ -17,26 +17,55 @@ const injectCss = (css) => {
 }
 
 export const PANEL_CSS = `
-/* ===== 桌面版（Electron）标题栏避让 =====
-   桌面版窗口无系统边框，外壳用 html[data-windows-titlebar]（Windows）/
-   html[data-platform="darwin"]（macOS）标出顶部拖动区，并定义
-   --dsh-frame-top-clearance（Windows 下 = 标题栏高；macOS 下 48px）。Web 版没有这两个
-   标记与变量（var 回退 0px），因此本组规则在浏览器里**完全无副作用**。
-   不加这组规则时，满高的 fixed 覆盖层（面板/竖条/diff 抽屉与遮罩）会盖住标题栏的
-   拖动区与窗口控制按钮，桌面版下会挡操作。all:initial 之类整体重置不可取——
-   只逐项改 top，其余几何（left/right/bottom/width、滚动、z-index）保持原样。
-   ↓ 避让之后又冒出一个新问题：三块覆盖层的顶边（.gp-header / .gp-rail /
-   .gp-diff-head）与标题栏同用 --dsw-specific-sidebar-fill，同一片底色上下相接，
-   肉眼分不出「面板顶」与「窗口标题栏下沿」在哪（桌面版实测整块连成一片灰）。
-   故在这三处顶边各补一条 1px 结构线，取值同面板内其他结构分隔（--gp-border-1）——
-   标题栏下沿因此多出一道可见分界。Web 版面板贴视口顶（top:0），这条线落在屏幕
-   最上沿，不改变观感。 */
-html[data-windows-titlebar] .gp-panel, html[data-platform="darwin"] .gp-panel,
-html[data-windows-titlebar] .gp-rail, html[data-platform="darwin"] .gp-rail,
-html[data-windows-titlebar] .gp-diff-backdrop, html[data-platform="darwin"] .gp-diff-backdrop,
-html[data-windows-titlebar] .gp-diff-drawer, html[data-platform="darwin"] .gp-diff-drawer {
+/* ===== 桌面版（Electron）顶带处理 =====
+   桌面版窗口无系统边框，宿主在根元素发布顶带几何：--dsh-frame-top-clearance
+   （macOS 48px，Windows = caption/标题栏高），并以 html[data-windows-titlebar]
+   （Windows）/ html[data-platform="darwin"]（macOS）标出平台。Web 版两者皆无
+   （var 回退 0px），本组规则在浏览器里完全无副作用。两平台机制不同，分开处理：
+   - Windows：外壳自绘 caption 行（窗口控制按钮在右上角），插件占不到也不能替代，
+     面板/竖条/抽屉/遮罩整体从 caption 下沿开始。
+   - macOS：宿主不画拖动带 —— darwin 的拖动几何就是各 chrome 行自身的盒子（宿主
+     约定行标 data-window-drag，行空白处拖窗口、控件可点）。插件原先整体下移 48px
+     避让，结果顶带在面板宽度这一段没人绘制，右上角露出一块外壳底色空缺。改为
+     面板/抽屉直接撑到窗口顶（top:0），标题行加高到顶带高度与宿主标题行同一行
+     对齐，并自带 darwin 拖动区（标题行空白拖窗口，行内 button no-drag 保持可点；
+     fullscreen 下宿主关闭全部拖动带，此处同步关闭）。竖条（.gp-rail）无标题行，
+     基础规则本就 top:0，整条保持可点。窄窗口守卫：面板顶到窗口顶后左上角可能
+     触及交通灯，用宿主发布的 --dsh-frame-leading-clearance（红绿灯带宽）收窄
+     面板最大宽。遮罩例外：保持从顶带下沿开始 —— 半透明临时层，顶带留白让
+     diff 打开期间顶部拖动仍然可用。
+   三处顶边（.gp-header / .gp-rail / .gp-diff-head）各有一条 1px 结构线
+   （border-top，取值 --gp-border-1）：Windows 下充当「面板顶 vs caption 行」的
+   可见分界；darwin/web 下面板贴窗口顶，这条线落在屏幕最上沿，不改变观感。 */
+html[data-windows-titlebar] .gp-panel,
+html[data-windows-titlebar] .gp-rail,
+html[data-windows-titlebar] .gp-diff-backdrop,
+html[data-windows-titlebar] .gp-diff-drawer {
   top: var(--dsh-frame-top-clearance, 0px);
 }
+/* macOS：面板/抽屉撑满到窗口顶（竖条基础规则本就 top:0，无需另写） */
+html[data-platform="darwin"] .gp-panel,
+html[data-platform="darwin"] .gp-diff-drawer { top: 0; }
+/* macOS：面板最大宽让出左上角交通灯带（窄窗口下 top:0 的面板可能触及红绿灯） */
+html[data-platform="darwin"] .gp-panel {
+  max-width: calc(100vw - var(--dsh-frame-leading-clearance, 84px));
+}
+/* macOS：遮罩从顶带下沿开始，diff 打开期间顶部拖动不受影响 */
+html[data-platform="darwin"] .gp-diff-backdrop { top: var(--dsh-frame-top-clearance, 48px); }
+/* macOS：标题行加高到顶带高度，与宿主标题行同一行（.gp-header 已随 .gp-panel *
+   继承 border-box；.gp-diff-drawer 不在通配范围内，须显式声明，否则 padding 撑破 48px） */
+html[data-platform="darwin"] .gp-header,
+html[data-platform="darwin"] .gp-diff-head {
+  height: var(--dsh-frame-top-clearance, 48px);
+  box-sizing: border-box;
+}
+/* macOS：标题行即拖动带（fullscreen 下宿主关闭全部拖动带，同步关闭）；
+   行内控件 no-drag —— Electron 约定 drag 区的子元素默认随区拖动，必须逐个豁免，
+   两处标题行的可点元素均为 <button>（刷新/目录/设置/关闭、分栏/全文/关闭） */
+html[data-platform="darwin"]:not([data-fullscreen]) .gp-header,
+html[data-platform="darwin"]:not([data-fullscreen]) .gp-diff-head { -webkit-app-region: drag; }
+html[data-platform="darwin"] .gp-header button,
+html[data-platform="darwin"] .gp-diff-head button { -webkit-app-region: no-drag; }
 /* ===== 面板统一边框色 =====
    主题边框透明度太低（亮 4%/10%，暗 6%/12%），分割线肉眼难辨。面板内自定义两级：
    --gp-border-1 结构性分隔线/容器描边（标题栏、仓库卡片、提交区、历史、diff 等）
