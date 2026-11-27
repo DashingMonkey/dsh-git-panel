@@ -1,6 +1,6 @@
-/** 布局模式（dock 停靠 / overlay 浮窗）几何写路径 + DockSync 同步组件。 */
+/** 侧边栏停靠（dock）几何写路径 + DockSync 同步组件。 */
 import React from 'react'
-// ===== 布局模式（dock 停靠 / overlay 浮窗）几何写路径 =====
+// ===== 侧边栏停靠（dock）几何写路径 =====
 // 主路径纯 CSS：body[data-gp-dock] 属性 + div:has(> [data-shell-overlay]) 选择器
 // （见样式段注释）。:has() 不可用的老环境走 JS 兜底：直接给 frame
 // （[data-shell-overlay] 的父级）写内联 padding-right。React 重渲染只 diff 自己

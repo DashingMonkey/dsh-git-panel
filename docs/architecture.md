@@ -197,10 +197,11 @@ host.js 刻意保持**零 import**（文件态 npm 包把它原样复制出去�
 15px 的单选点（`.gp-layout-radio`）变成圆角方块，都是这条全局规则造成的。宿主自己的
 组件（含官方 spinner）都额外写 `corner-shape: round` 才保住圆形。
 
-约定：面板内**凡是必须是正圆的元素都自己声明 `corner-shape: round`**（类选择器
+约定：面板内**凡是必须保持正圆/规则圆角的元素都自己声明 `corner-shape: round`**（类选择器
 0,1,0 压过主题的 `*` 0,0,0；不支持该属性的浏览器忽略此声明，`border-radius:50%`
 本来就是正圆，两个方向都安全）。该属性不继承，`::after` 这类伪元素必须各自再写一次。
-当前三处：`.gp-spinner`、`.gp-layout-radio`、`.gp-layout-radio::after`。其余圆角
+当前四处：`.gp-spinner`、`.gp-layout-radio`、`.gp-layout-radio::after`、`.gp-toggle-box`
+（勾选框是 4px 小圆角，同样会被 superellipse 画成方圆角）。其余圆角
 （卡片/按钮/pill）沿用宿主设计语言，**不要**整体覆盖成 round。
 
 ### 陷阱：inline-flex 的基线取自「第一个子项」，会把同行文字错开

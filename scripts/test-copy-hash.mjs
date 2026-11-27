@@ -33,7 +33,10 @@ scenario('copy 图标', [
 
 scenario('CommitDetailPop 复制入口', [
   has(R('src/client/components/GitGraphView.js'), "import { tr, fmt } from '../i18n.js'", '导入 fmt（成功 toast 文案带短哈希）'),
-  has(R('src/client/components/GitGraphView.js'), "import { pushToast, useStore } from '../store.js'", '导入 pushToast'),
+  // 只为确认 pushToast 从 store 模块导入：不钉整行 import，避免 import 列表增删时
+  // 这条「复制哈希」测试误报（savePrefBool/store 之类与复制无关的符号不该焊在这里）
+  has(R('src/client/components/GitGraphView.js'), "from '../store.js'", '从 store 模块导入'),
+  has(R('src/client/components/GitGraphView.js'), 'pushToast(', '使用 pushToast 回声'),
   has(R('src/client/components/GitGraphView.js'), 'const copyFullHash = async () =>', '定义 copyFullHash 异步函数'),
   has(R('src/client/components/GitGraphView.js'), 'const clip = window.navigator && window.navigator.clipboard', '主通道：Async Clipboard API（经 window 取用，符合 lint 全局白名单约定）'),
   has(R('src/client/components/GitGraphView.js'), "if (clip && clip.writeText) { await clip.writeText(text); ok = true }", '写剪贴板'),

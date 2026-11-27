@@ -30,7 +30,7 @@
     "build": "node scripts/build.mjs",
     "lint": "node scripts/lint-client.mjs",
     "pretest": "node scripts/build.mjs",
-    "test": "node scripts/test-write-result.mjs && node scripts/test-message-draft.mjs && node scripts/test-rules-dirs.mjs && node scripts/test-scan-depth.mjs && node scripts/test-generate-fallback.mjs && node scripts/test-gen-usage.mjs && node scripts/test-collapse-prefs.mjs && node scripts/test-native-sidebar.mjs && node scripts/test-copy-hash.mjs && node scripts/test-git-lock-retry.mjs && node scripts/check-client-bundle.mjs",
+    "test": "node scripts/test-write-result.mjs && node scripts/test-message-draft.mjs && node scripts/test-rules-dirs.mjs && node scripts/test-scan-depth.mjs && node scripts/test-generate-fallback.mjs && node scripts/test-gen-usage.mjs && node scripts/test-collapse-prefs.mjs && node scripts/test-startup-open.mjs && node scripts/test-native-sidebar.mjs && node scripts/test-graph-meta.mjs && node scripts/test-copy-hash.mjs && node scripts/test-git-lock-retry.mjs && node scripts/check-client-bundle.mjs",
     "prepare": "npm run build"
   },
   "devDependencies": {

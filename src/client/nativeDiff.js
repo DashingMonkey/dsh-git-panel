@@ -1,7 +1,7 @@
 /**
  * 原生侧栏「变更详情」页签的开合入口。
  *
- * Git Panel 自己的抽屉（DiffDrawer）在 dock/overlay 下贴面板左缘滑出；原生侧栏模式
+ * Git Panel 自己的抽屉（DiffDrawer）在 dock 下贴面板左缘滑出；原生侧栏模式
  * （layout === 'native'）下点 Git 历史里的文件（group === 'commit'）改为开一枚新的
  * 制表签页签——变更内容由 DiffPaneHost 以内嵌形态铺满该页签，不再浮出一层独立侧栏。
  * 本模块是这条路径的唯一出口：GitPanelMain 不直接碰 sidebarRight 服务（跨作用域引用

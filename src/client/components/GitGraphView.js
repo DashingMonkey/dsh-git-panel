@@ -3,7 +3,7 @@ import React from 'react'
 import { callRpc } from '../api.js'
 import { tr, fmt } from '../i18n.js'
 import { getTimer } from '../runtime.js'
-import { pushToast, useStore } from '../store.js'
+import { pushToast, savePrefBool, store, useStore } from '../store.js'
 import { icon } from '../icons.js'
 import { computeGraph, laneColor, parseRefs } from '../lib/graph.js'
 import { glyphOf, splitPath } from '../lib/util.js'
@@ -291,8 +291,9 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
     refs.tags.forEach((t, ti) => refEls.push(React.createElement('span', { key: 't' + ti, className: 'gp-grow-ref gp-grow-ref-tag' }, t)))
     const subjectEl = React.createElement('span', { className: 'gp-grow-subject' }, e.subject)
     const refsEl = refEls.length > 0 ? React.createElement('span', { className: 'gp-grow-refs' }, refEls) : null
-    // 行右侧小字（作者 · 日期）：设置页开关 showGraphMeta 控制，默认关闭——
-    // 长列表里每行都挂这串小字视觉噪音偏大，需要看日期的用户手动开启即可。
+    // 行右侧小字（作者 · 日期）：默认关闭，由工具条最右端的日历按钮就地开关
+    //（原先埋在「面板设置」里，离列表太远；这属于本视图的显示密度，就地切换更直接）。
+    // 偏好写 localStorage（gp-graph-meta），重开面板后保持。
     const metaEl = s.showGraphMeta ? React.createElement('span', { className: 'gp-grow-meta' }, (e.author || '') + ' · ' + (e.date || '').slice(0, 10)) : null
     // 展开行：SVG 拉高使 lane 贯穿，右侧为「顶栏 + 文件列表」纵向列；普通行保持原平铺。
     // 展开态复用 gp-grow-sel（选中样式：品牌色左边条 + 浅底）
@@ -329,9 +330,26 @@ function GitGraphView({ repo, onOpenDiff, diffSel }) {
     setExpanded(null)
     setView(v)
   }
+  // 行末「作者 · 日期」开关：图标按钮贴工具条最右侧（margin-left:auto），点击即翻转并落盘。
+  // 只影响行渲染（全局偏好，其他仓库卡片的历史行会同步更新），不重拉数据——所以不需要
+  // closeHover 之类的收尾动作。
+  const metaOn = s.showGraphMeta
+  const toggleMeta = () => {
+    store.set((st) => ({ ...st, showGraphMeta: !st.showGraphMeta }))
+    savePrefBool('gp-graph-meta', store.get().showGraphMeta) // set 之后再读：拿到的是新值
+  }
+  const metaTip = tr(metaOn ? 'graphMetaHideTip' : 'graphMetaShowTip')
   const bar = React.createElement('div', { className: 'gp-graph-bar' },
     React.createElement('button', { className: 'gp-graph-tab' + (view === 'auto' ? ' gp-graph-tab-on' : ''), title: tr('graphViewCurrentTip'), onClick: () => switchView('auto') }, tr('graphViewCurrent')),
-    React.createElement('button', { className: 'gp-graph-tab' + (view === 'all' ? ' gp-graph-tab-on' : ''), title: tr('graphViewAllTip'), onClick: () => switchView('all') }, tr('graphViewAll')))
+    React.createElement('button', { className: 'gp-graph-tab' + (view === 'all' ? ' gp-graph-tab-on' : ''), title: tr('graphViewAllTip'), onClick: () => switchView('all') }, tr('graphViewAll')),
+    // 图标按钮（无文字）：title 是随态的动作提示，aria-label 用**稳定名字**——
+    // toggle 按钮的名字不该随状态翻转（否则读屏念「隐藏…，已按下」自相矛盾），
+    // 开关态交给 aria-pressed。激活态用品牌色 + 浅底，与「当前分支 / 全部」同款语言。
+    React.createElement('button', {
+      className: 'gp-graph-meta-btn' + (metaOn ? ' gp-graph-meta-on' : ''),
+      title: metaTip, 'aria-label': tr('graphMetaLabel'), 'aria-pressed': metaOn,
+      onClick: toggleMeta
+    }, icon('calendar', 14)))
 
   // 悬停唤出的提交详情浮层（见 CommitDetailPop），可移入浮层内查看
   const pop = hover ? React.createElement(CommitDetailPop, { hover, detailCache, onMouseEnter: cancelHide, onMouseLeave: scheduleHide }) : null

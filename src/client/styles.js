@@ -102,6 +102,15 @@ body[data-ds-dark-theme] { --gp-pop-bg: color-mix(in srgb, var(--dsw-alias-bg-ov
 /* 标题（logo + 文字）整体是可点按钮：点击折叠到侧栏。负 margin 抵消内边距，保持原排版不变。
    悬停不做任何高亮/阴影（保持标题栏静态观感），仅保留 pointer 手型提示可点；也不挂 title 气泡。 */
 .gp-title-btn { border: none; background: transparent; color: inherit; font-family: inherit; padding: 2px 6px; margin: -2px -6px; border-radius: 5px; cursor: pointer; }
+/* native 页签 chip 的标题内容（标题席位注入）：图标 + 产品名。标题席位外层是
+   display:contents，这个 span 直接进 dockkit 的标题行（flex:1 1 auto，gap 5px）。
+   右侧留白用来避让 dockkit 的关闭键区：选中 / hover / focus-within 时标题行无条件加
+   mask-image（从 calc(100% - 30px) 开始渐隐，到 14px 处完全透明），关闭键是 right:4px、
+   20px 的绝对定位层。标题文字若顶到行尾就会被吃掉（实测「Git Panel」少一个 l，且 tab 是
+   flex:0 1 auto 按内容算宽，chip 也随之变窄）。
+   30px = 渐隐带的起点（最紧值），实际取 32：给字体亚像素/高 DPI 取整留 2px 余量，
+   视觉上与 30 无差，但末笔不会被压暗。 */
+.gp-tab-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding-right: 32px; }
 /* 折叠态：右侧 44px 竖条，整条可点击展开；只露 logo 图标 + 竖排文字；
    折叠/展开时与面板交叉滑入/滑出（translateX 纯位移，类 diff 抽屉动效） */
 .gp-rail { position: fixed; top: 0; right: 0; bottom: 0; width: 44px; box-sizing: border-box; background: var(--dsw-specific-sidebar-fill); border: none; border-top: 1px solid var(--gp-border-1); border-left: 1px solid var(--gp-border-1); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 11px 0; cursor: pointer; z-index: 60; color: var(--dsw-alias-label-primary); font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; box-shadow: -6px 0 16px rgba(0,0,0,.10); transition: transform .22s cubic-bezier(.2,.8,.2,1); }
@@ -275,6 +284,13 @@ body[data-ds-dark-theme] .gp-btn-danger { color: #16181d; text-shadow: none; }
 .gp-graph-tab { border: none; background: transparent; color: var(--dsw-alias-label-secondary); font-family: inherit; font-size: 12px; padding: 2px 8px; border-radius: 5px; cursor: pointer; }
 .gp-graph-tab:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .gp-graph-tab-on { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
+/* 工具条右端的「行末作者 · 日期」开关：图标按钮，margin-left:auto 把它推到最右。
+   尺寸按 24×22 = WCAG 2.2 SC 2.5.8 的最小点击目标（与 .gp-btn-icon 的 min 尺寸一致），
+   比行内 12px 文字略高但不撑高工具条主体。激活态与 .gp-graph-tab-on / .gp-btn-icon.gp-on
+   同款语言（品牌色 + 浅底），关闭态保持次级文字色，不抢「当前分支 / 全部」的权重。 */
+.gp-graph-meta-btn { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 22px; padding: 0; border: none; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.gp-graph-meta-btn:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.gp-graph-meta-on, .gp-graph-meta-on:hover { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
 .gp-graph-scroll { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .gp-grow { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px; cursor: pointer; border-left: 2px solid transparent; box-sizing: border-box; overflow: hidden; }
 .gp-grow:hover { background: var(--dsw-alias-bg-layer-2); }
@@ -525,7 +541,7 @@ body[data-gp-dock="1"] div:has(> [data-shell-overlay]) {
 }
 /* 拖拽调宽期间关闭 padding 过渡（对齐 .gp-noanim 惯例，避免跟手延迟） */
 body[data-gp-dock-noanim="1"] div:has(> [data-shell-overlay]) { transition: none !important; }
-/* 停靠态面板是布局的一部分：去投影（浮窗模式保留投影提供深度感） */
+/* 停靠态面板是布局的一部分：去投影（窄窗退化成覆盖形态时保留投影提供深度感） */
 body[data-gp-dock="1"] .gp-panel { box-shadow: none; }
 /* 停靠态 Toast 栈避开面板，落到面板左侧 */
 body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 14px); }
@@ -542,18 +558,28 @@ body[data-gp-dock="1"] .gp-toast-stack { right: calc(var(--gp-dock-w, 520px) + 1
 .gp-layout-opt-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .gp-layout-opt-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .gp-layout-opt-desc { font-size: 12px; color: var(--dsw-alias-label-secondary); line-height: 1.5; }
-/* 「隐藏左下角开关」独立开关行：外观与布局单选卡一致，但勾选位是方形勾选框
-   （对勾用两条旋转边框拼出，不引入图标资源）。 */
-.gp-toggle-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--gp-border-2); border-radius: 8px; padding: 11px 12px; cursor: pointer; color: var(--dsw-alias-label-primary); font-size: 13px; margin-top: 12px; font-family: inherit; }
+/* 独立开关行（勾选框式，无说明行）：黑白风格——勾选态不用品牌色，靠「前景色填充的勾选框
+   + 反色对勾」表达状态（浅色主题黑底白勾、深色主题白底黑勾，对勾颜色取面板底色刚好反相），
+   整行再加一层中性淡底与更深的描边；hover 在勾选态下只把底色再压深一档，不能退回默认灰
+   （否则鼠标一放上去选中感就没了）。
+   对勾用线性字形（icons.js 的 checkLine：lucide check 同款，24 网格、round 端点，14px 显示、
+   描边 3 折算约 1.75px），不再用「两条旋转边框」拼——小尺寸下拼出来的描边接缝、斜切端点、
+   2px 粗细在 16px 方框里都不够干净；也试过 codicon 填充对勾，缩到 12~13px 笔画收尖发虚。
+   结构与入场动效参考 Radix / shadcn 的 checkbox（方框 + 14px 图形 + scale/opacity 过渡）。
+   图形常驻、由 opacity/transform 显隐，切换时才有 120ms 的弹入，卸载重建会闪。corner-shape:round 同单选点：主题 superellipse 会把圆角画成圆角方块。 */
+.gp-toggle-opt { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; text-align: left; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--gp-border-2); border-radius: 8px; padding: 9px 12px; cursor: pointer; color: var(--dsw-alias-label-primary); font-size: 13px; margin-top: 10px; font-family: inherit; transition: background .12s ease, border-color .12s ease; }
 .gp-toggle-opt:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.gp-toggle-on { border-color: var(--dsw-alias-brand-primary); }
-.gp-toggle-box { flex: none; width: 15px; height: 15px; border-radius: 4px; corner-shape: round; border: 1.5px solid var(--gp-border-2); margin-top: 2px; position: relative; transition: border-color .12s ease; background: transparent; }
-.gp-toggle-on .gp-toggle-box { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-brand-primary); }
-.gp-toggle-on .gp-toggle-box::before { content: ''; position: absolute; left: 3.5px; top: 1.5px; width: 4.5px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(38deg); }
+.gp-toggle-label { font-weight: 600; }
+.gp-toggle-box { flex: none; box-sizing: border-box; width: 16px; height: 16px; border-radius: 4px; corner-shape: round; border: 1.5px solid var(--gp-border-2); display: flex; align-items: center; justify-content: center; position: relative; background: transparent; transition: background .12s ease, border-color .12s ease; }
+.gp-toggle-box svg { color: var(--dsw-alias-bg-layer-1); opacity: 0; transform: scale(.6); transition: opacity .08s ease, transform .12s cubic-bezier(.2, .8, .2, 1); }
+.gp-toggle-opt.gp-toggle-on { border-color: var(--dsw-alias-label-secondary); background: color-mix(in srgb, var(--dsw-alias-label-primary) 6%, var(--dsw-alias-bg-layer-2)); }
+.gp-toggle-opt.gp-toggle-on:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary) 11%, var(--dsw-alias-bg-layer-2)); }
+.gp-toggle-opt.gp-toggle-on .gp-toggle-box { border-color: var(--dsw-alias-label-primary); background: var(--dsw-alias-label-primary); }
+.gp-toggle-opt.gp-toggle-on .gp-toggle-box svg { opacity: 1; transform: none; }
 .gp-layout-default-badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 7px; border: 1px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); flex: none; line-height: 1.6; }
-.gp-layout-hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; margin: 6px 0 0; }
 /* ===== 原生侧栏模式（native）：面板成为 DSH 右栏制表签页的页签正文 =====
-   body[data-gp-layout='native'] 由 apply 在布局模式为 native 时挂到 <html> 上。
+   body[data-gp-layout='native'] 由 apply 里的布局订阅挂到 <body> 上（写 documentElement
+   是死代码：本段选择器全部以 body[...] 开头）。
    .gp-pane-host 是页签正文的容器（sidebar.right.pane.tab 的直接子元素，面板在
    其内部）：高度 100%、纵向布局。内部 .gp-panel 不再是 fixed 覆盖层——覆写其
    固定定位与宽度，让它成为普通文档流的整块（宽=容器宽）。diff 抽屉按「贴容器

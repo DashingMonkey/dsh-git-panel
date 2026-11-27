@@ -38,6 +38,9 @@ const TEXTS = {
     historyLoadFailed: '读取历史失败', loadingHistory: '加载历史…', graphHint: '点击行查看提交详情', loadingDetail: '加载详情…',
     graphViewCurrent: '当前分支', graphViewAll: '全部',
     graphViewCurrentTip: '只画当前分支及其上游可达的提交（默认）', graphViewAllTip: '画出所有分支与标签的提交（含备份等旁支）',
+    // 历史工具条右端的日历按钮（就地开关行末「作者 · 日期」小字，偏好记忆在 gp-graph-meta）；
+    // Label 是给读屏的稳定名字（不随状态翻转），两个 Tip 才是随态动作提示。
+    graphMetaLabel: '行末作者与日期', graphMetaShowTip: '在每行右侧显示作者与日期', graphMetaHideTip: '隐藏每行右侧的作者与日期',
     loadingFiles: '加载文件…', commitNoFiles: '该提交无文件变更（合并提交无合并差异）',
     stageFirst: '请先点击文件右侧的 + 暂存要提交的文件', noChangesToGenerate: '没有可生成的变更：工作区没有任何改动', generated: '已生成提交信息（规则来源：{s}）',
     ruleRepo: '仓库专属', ruleGlobal: '全局', ruleBuiltin: '内置默认', genFailedKeep: '生成失败，已保留原内容', genFailed: '生成失败: {e}', genTimeout: '生成超时，请重试',
@@ -115,13 +118,12 @@ const TEXTS = {
     rescan: '重新扫描（并刷新所有仓库状态）', openFolder: '在文件资源管理器中打开工作空间', openFolderFailed: '打开文件夹失败: {e}', openFolderUnavailable: '文件管理器服务不可用',
     locating: '正在定位工作空间…', scanning: '正在扫描 Git 仓库…', scanFailed: '扫描失败',
     noWorkspace: '未打开工作空间', noRepos: '当前工作空间内未发现 Git 仓库。', resizeTitle: '拖拽调整面板宽度',
-    toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel',
+    toastsLabel: 'Git Panel 通知', panelLabel: 'Git Panel 面板', toggleTitle: 'Git Panel', nativeTabTitle: 'Git Panel',
     expandTitle: '展开 Git Panel',
     panelSettings: '面板设置',
-    modeDock: '侧边栏模式', modeDockDesc: '面板停靠在对话右侧，对话区域自动收窄让位', modeDockBadge: '默认',
-    modeOverlay: '浮窗模式', modeOverlayDesc: '面板浮在对话区域上方，不改变对话布局',
-    modeNative: '原生侧栏', modeNativeDesc: '作为 DSH 右侧栏的制表签页签常驻（会话级停靠面），与会话一同收放',
-    gpNativeFailed: '原生侧栏不可用：已打开本面板但制表签服务缺失，请检查插件装载',
+    modeDock: '独立侧边栏', modeDockDesc: '插件自绘的面板，贴在窗口右缘；打开时对话区自动收窄让位', modeDockBadge: '默认',
+    modeNative: '内置侧边栏页签', modeNativeDesc: '作为 DSH 右侧栏的一枚页签（与 Files / Terminal 并列），随会话一同收放',
+    gpNativeFailed: '内置侧边栏页签不可用：制表签服务缺失，请检查插件装载',
     // 右栏开始页（引导页）入口卡片：标题与描述取自制表签类型注册的 guide 条目
     gpGuideTitle: 'Git 工作区面板', gpGuideDesc: '暂存 / 提交 / 生成提交信息，跟随当前工作空间',
     // 生成用量统计（默认关闭）：开关 + 累计行 + 生成进度的 tokens 后缀
@@ -131,13 +133,13 @@ const TEXTS = {
     gpUsageCumulative: '累计生成 {n} 次 · {t} tokens',
     // 开关 RPC 失败（宿主半体未重启时不支持这两个方法）：指向可执行的下一步
     gpUsageRpcFailed: '切换失败：宿主尚未支持此功能——请完全退出并重新打开 DeepSeek Harness 后重试',
-    // 设置 → 隐藏左下角 Git Panel 开关按钮（dock/overlay 由折叠竖条兜底重开，native 由开始页卡片兜底）
-    hideToggleTitle: '隐藏左下角 Git Panel 按钮', hideToggleDesc: '侧栏底部不再显示面板入口开关',
-    // 历史图行右侧小字（作者 · 日期）开关：默认关闭
-    showMetaTitle: '显示历史行日期', showMetaDesc: '提交记录每行右侧显示作者与日期（默认关闭，减少长列表噪音）',
-    // 原生侧栏「变更详情」页签（Git 历史文件点击新开的那一枚）
-    gpDiffTitle: '变更详情', gpDiffEmpty: '无法读取该文件的变更信息',
-    layoutNarrowHint: '窗口较窄时，侧边栏模式会临时按浮窗显示，拉宽窗口后自动恢复。'
+    // 设置 → 两个独立开关（勾选框式、无说明行）：标题语义自明，设置页保持精简。
+    // 隐藏左下角 Git Panel 开关按钮（dock 由折叠竖条兜底重开，native 由开始页卡片兜底）
+    hideToggleTitle: '隐藏左下角 Git Panel 按钮',
+    // 启动即展开（默认开）：只影响独立侧边栏；内置侧边栏页签归右栏自己恢复
+    openOnStartTitle: '启动时自动打开面板',
+    // 内置侧边栏页签里的「变更详情」页签（Git 历史文件点击新开的那一枚）
+    gpDiffTitle: '变更详情', gpDiffEmpty: '无法读取该文件的变更信息'
   },
   en: {
     groupStaged: 'Staged Changes', groupChanges: 'Changes', groupUntracked: 'Untracked Changes', groupConflicted: 'Merge Conflicts', history: 'History',
@@ -161,6 +163,9 @@ const TEXTS = {
     historyLoadFailed: 'Failed to load history', loadingHistory: 'Loading history…', graphHint: 'Click a row to view commit details', loadingDetail: 'Loading details…',
     graphViewCurrent: 'Current branch', graphViewAll: 'All',
     graphViewCurrentTip: 'Show commits reachable from the current branch and its upstream (default)', graphViewAllTip: 'Show commits of all branches and tags (including backup branches)',
+    // Calendar button at the right end of the history toolbar (toggles the per-row author · date suffix; preference stored in gp-graph-meta);
+    // Label is the stable accessible name, the two Tips are the state-dependent action hints.
+    graphMetaLabel: 'Author and date on each row', graphMetaShowTip: 'Show author and date on the right of each row', graphMetaHideTip: 'Hide author and date on the right of each row',
     loadingFiles: 'Loading files…', commitNoFiles: 'No file changes in this commit (merge without combined diff)',
     stageFirst: 'Stage files first using the + on the right of each file', noChangesToGenerate: 'Nothing to generate from: the working tree has no changes', generated: 'Commit message generated (rules: {s})',
     ruleRepo: 'repo-specific', ruleGlobal: 'global', ruleBuiltin: 'built-in', genFailedKeep: 'Generation failed; original content kept', genFailed: 'Generation failed: {e}', genTimeout: 'Generation timed out, please retry',
@@ -232,13 +237,12 @@ const TEXTS = {
     rescan: 'Rescan (also refreshes all repository statuses)', openFolder: 'Open workspace in file explorer', openFolderFailed: 'Failed to open folder: {e}', openFolderUnavailable: 'File manager service unavailable',
     locating: 'Locating workspace…', scanning: 'Scanning for Git repositories…', scanFailed: 'Scan failed',
     noWorkspace: 'No workspace open', noRepos: 'No Git repositories found in the current workspace.', resizeTitle: 'Drag to resize the panel width',
-    toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel',
+    toastsLabel: 'Git Panel notifications', panelLabel: 'Git Panel panel', toggleTitle: 'Git Panel', nativeTabTitle: 'Git Panel',
     expandTitle: 'Expand Git Panel',
     panelSettings: 'Panel Settings',
-    modeDock: 'Side panel', modeDockDesc: 'The panel docks to the right of the conversation, which narrows to make room', modeDockBadge: 'Default',
-    modeOverlay: 'Floating overlay', modeOverlayDesc: 'The panel floats above the conversation without changing its layout',
-    modeNative: 'Native sidebar', modeNativeDesc: 'Lives as a tab in DSH\'s right sidebar (a per-session docked surface), expanding and collapsing with the conversation',
-    gpNativeFailed: 'Native sidebar unavailable: the panel is open but its tab service is missing — check plugin loading',
+    modeDock: 'Standalone sidebar', modeDockDesc: 'A panel drawn by the plugin, attached to the right edge of the window; opening it narrows the conversation area', modeDockBadge: 'Default',
+    modeNative: 'Built-in sidebar tab', modeNativeDesc: 'A tab inside DSH\'s right sidebar, alongside Files / Terminal, expanding and collapsing with the conversation',
+    gpNativeFailed: 'Built-in sidebar tab unavailable: the tab service is missing — check plugin loading',
     // Guide-page (start page) entry card in the right sidebar: title and description come from the guide entry of the tab type registration
     gpGuideTitle: 'Git workspace panel', gpGuideDesc: 'Stage, commit, and generate commit messages, following the current workspace',
     // Generation usage accounting (off by default): switch + cumulative row + tokens suffix on generation progress
@@ -248,13 +252,13 @@ const TEXTS = {
     gpUsageCumulative: '{n} generations · {t} tokens total',
     // RPC failure fallback (host half does not support these methods before a restart): point to the actionable next step
     gpUsageRpcFailed: 'Switch failed: this host build does not support it yet — fully quit and reopen DeepSeek Harness, then retry',
-    // Settings → hide the bottom-left Git Panel toggle (dock/overlay falls back to the collapse rail; native falls back to the guide-page card)
-    hideToggleTitle: 'Hide the bottom-left Git Panel button', hideToggleDesc: 'No panel entry button at the sidebar footer',
-    // Toggle for the per-row author+date suffix in the commit graph (off by default)
-    showMetaTitle: 'Show history row dates', showMetaDesc: 'Each commit row shows author and date on the right (off by default, to reduce long-list noise)',
-    // Native sidebar "change details" tab (the one opened when clicking a git-history file)
-    gpDiffTitle: 'Change details', gpDiffEmpty: 'Could not read change information for this file',
-    layoutNarrowHint: 'On narrow windows the side-panel mode temporarily behaves as floating; it restores automatically once the window is widened.'
+    // Settings → two independent switches (checkbox style, no description lines): the titles speak for themselves.
+    // Hide the bottom-left Git Panel toggle (dock falls back to the collapse rail; native falls back to the guide-page card)
+    hideToggleTitle: 'Hide the bottom-left Git Panel button',
+    // Open on startup (on by default): affects the standalone sidebar only; the built-in tab is restored by the right sidebar itself
+    openOnStartTitle: 'Open panel on startup',
+    // "Change details" tab inside the built-in sidebar tab (the one opened when clicking a git-history file)
+    gpDiffTitle: 'Change details', gpDiffEmpty: 'Could not read change information for this file'
   }
 }
 function tr(key) {

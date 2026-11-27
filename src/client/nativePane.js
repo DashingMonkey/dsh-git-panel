@@ -19,7 +19,8 @@ import { tr } from './i18n.js'
 
 const NATIVE_KIND = 'git-panel'
 const NATIVE_TAB_ID = '@dsh-local/git-panel'
-// sessionId → 已开页签 id。session 切换后旧条目留着无妨（key 不同，不会误收）。
+// sessionId → 已开页签 id。session 切换后旧条目留着无妨（key 不同，不会误收）；
+// 页签正文卸载时会按值注销（unregisterNativeTab），不靠这张表判活。
 const nativeTabsBySession = new Map()
 
 function sidebarRightOf() {
@@ -54,16 +55,25 @@ function openNativeTab() {
   }
 }
 
-/** 页签正文挂载时补登记 id（开始页入口卡片开的页签不经过 openNativeTab）。 */
-function registerNativeTab(tabId) {
-  const sid = store.get().currentSessionId
-  if (sid && tabId) nativeTabsBySession.set(sid, String(tabId))
+/** 页签正文挂载时补登记 id（开始页入口卡片开的页签不经过 openNativeTab）。
+ *  sessionId 由会话作用域的槽位 props 给出：keepMounted 保活后后台会话的正文仍在树上，
+ *  不能用全局 currentSessionId 猜（会把旧页签登记到新会话名下）。 */
+function registerNativeTab(sessionId, tabId) {
+  if (sessionId && tabId) nativeTabsBySession.set(String(sessionId), String(tabId))
+}
+
+/** 页签正文卸载时按值注销：只删自己那一条，避免覆盖同会话里新开的页签（关页签后
+ *  这张表不再留着陈旧 id，hide 不会对已死的页签发动作）。 */
+function unregisterNativeTab(sessionId, tabId) {
+  if (!sessionId || !tabId) return
+  const sid = String(sessionId)
+  if (nativeTabsBySession.get(sid) === String(tabId)) nativeTabsBySession.delete(sid)
 }
 
 // 收起页签（两种收尾）：
-//   hideNativeTab     —— 用户主动收（开关再点 / header 关闭键）：连 panelOpen 一起复位；
+//   hideNativeTab     —— 用户主动收（侧栏底部开关再点）：连 panelOpen 一起复位；
 //   quietHideNativeTab —— 模式切换等非用户路径的静默收，只关页签不动开关态，
-//                       让 dock/overlay 实例按当前 panelOpen 无缝接管。
+//                       让 dock 实例按当前 panelOpen 无缝接管。
 function quietHideNativeTab() {
   const sid = store.get().currentSessionId
   const tid = sid ? nativeTabsBySession.get(sid) : undefined
@@ -83,6 +93,7 @@ export {
   canUseNativePane,
   openNativeTab,
   registerNativeTab,
+  unregisterNativeTab,
   quietHideNativeTab,
   hideNativeTab,
   nativeTabsBySession
